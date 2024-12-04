@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("dcim", "0002_initial"),
+        ("dcim", "0064_optimization_initial_part_2"),
     ]
 
     operations = [

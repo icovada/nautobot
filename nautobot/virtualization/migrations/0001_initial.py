@@ -20,7 +20,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("dcim", "0003_initial"),
+        ("dcim", "0065_optimization_initial_part_3"),
         ("ipam", "0001_initial"),
         ("tenancy", "0001_initial"),
         ("extras", "0002_initial"),

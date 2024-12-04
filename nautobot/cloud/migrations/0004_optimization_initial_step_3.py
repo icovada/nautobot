@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
         ("cloud", "0003_optimization_initial_step_2"),
         ("ipam", "0001_initial"),
         ("extras", "0001_initial"),
-        ("dcim", "0002_initial"),
+        ("dcim", "0064_optimization_initial_part_2"),
     ]
 
     operations = [
