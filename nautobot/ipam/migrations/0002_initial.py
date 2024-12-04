@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
         ("ipam", "0001_initial"),
         ("tenancy", "0001_initial"),
         ("virtualization", "0001_initial"),
-        ("extras", "0002_initial"),
+        ("extras", "0118_optimization_initial_part_2"),
     ]
 
     operations = [

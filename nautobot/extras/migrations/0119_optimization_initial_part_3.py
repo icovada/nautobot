@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         ("tenancy", "0001_initial"),
         ("virtualization", "0001_initial"),
         ("dcim", "0066_optimization_initial_part_4"),
-        ("extras", "0002_initial"),
+        ("extras", "0118_optimization_initial_part_2"),
         ("contenttypes", "0002_remove_content_type_name"),
     ]
 

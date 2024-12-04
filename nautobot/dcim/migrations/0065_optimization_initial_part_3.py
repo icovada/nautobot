@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         ("ipam", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
         ("contenttypes", "0002_remove_content_type_name"),
-        ("extras", "0001_initial"),
+        ("extras", "0117_optimization_initial_part_1"),
         ("dcim", "0064_optimization_initial_part_2"),
     ]
 

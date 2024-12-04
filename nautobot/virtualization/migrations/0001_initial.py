@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
         ("dcim", "0065_optimization_initial_part_3"),
         ("ipam", "0001_initial"),
         ("tenancy", "0001_initial"),
-        ("extras", "0002_initial"),
+        ("extras", "0118_optimization_initial_part_2"),
         ("contenttypes", "0002_remove_content_type_name"),
     ]
 
