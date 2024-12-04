@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("cloud", "0002_initial"),
+        ("cloud", "0003_optimization_initial_step_2"),
         ("ipam", "0001_initial"),
         ("extras", "0001_initial"),
         ("dcim", "0002_initial"),
