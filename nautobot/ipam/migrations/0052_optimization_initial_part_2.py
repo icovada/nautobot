@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
         ("dcim", "0065_optimization_initial_part_3"),
         ("ipam", "0051_optimization_initial_part_1"),
         ("tenancy", "0010_optimization_initial"),
-        ("virtualization", "0001_initial"),
+        ("virtualization", "0031_optimization_initial"),
         ("extras", "0118_optimization_initial_part_2"),
     ]
 
