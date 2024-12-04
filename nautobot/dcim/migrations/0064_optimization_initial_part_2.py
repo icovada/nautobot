@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         ("contenttypes", "0002_remove_content_type_name"),
         ("extras", "0117_optimization_initial_part_1"),
         ("dcim", "0063_optimization_initial_part_1"),
-        ("tenancy", "0001_initial"),
+        ("tenancy", "0010_optimization_initial"),
     ]
 
     operations = [
