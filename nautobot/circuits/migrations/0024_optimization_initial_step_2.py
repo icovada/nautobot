@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("cloud", "0001_initial"),
-        ("circuits", "0001_initial"),
+        ("circuits", "0023_optimization_initial_step_1"),
         ("dcim", "0001_initial"),
         ("tenancy", "0001_initial"),
         ("contenttypes", "0002_remove_content_type_name"),
