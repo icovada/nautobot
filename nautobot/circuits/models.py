@@ -223,6 +223,17 @@ class CircuitTermination(PrimaryModel, PathEndpoint, CableTermination):
     class Meta:
         ordering = ["circuit", "term_side"]
         unique_together = ["circuit", "term_side"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(location__isnull=False, provider_network__isnull=True, cloud_network__isnull=True)
+                    | models.Q(location__isnull=True, provider_network__isnull=False, cloud_network__isnull=True)
+                    | models.Q(location__isnull=True, provider_network__isnull=True, cloud_network__isnull=False)
+                ),
+                name="circuits_circuittermination_attachment_constraint",
+                violation_error_message="A Circuit Termination can only attach to two elements between Location, Provider Network and Cloud Network",
+            )
+        ]
 
     def __str__(self):
         return f"Termination {self.term_side}: {self.location or self.provider_network or self.cloud_network}"
@@ -230,17 +241,6 @@ class CircuitTermination(PrimaryModel, PathEndpoint, CableTermination):
     def clean(self):
         super().clean()
 
-        # Must define either location *or* provider network
-        if self.location is None and self.provider_network is None and self.cloud_network is None:
-            raise ValidationError(
-                "A circuit termination must attach to a location, a provider network or a cloud network."
-            )
-        if self.location and self.provider_network:
-            raise ValidationError("A circuit termination cannot attach to both a location and a provider network.")
-        elif self.location and self.cloud_network:
-            raise ValidationError("A circuit termination cannot attach to both a location and a cloud network.")
-        elif self.provider_network and self.cloud_network:
-            raise ValidationError("A circuit termination cannot attach to both a provider network and a cloud network.")
         # A valid location for contenttype CircuitTermination must be assigned.
         if self.location is not None:
             if ContentType.objects.get_for_model(self) not in self.location.location_type.content_types.all():
