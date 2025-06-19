@@ -108,6 +108,19 @@ class Cable(PrimaryModel):
             ("termination_b_type", "termination_b_id"),
         )
 
+        constraints = [
+            models.UniqueConstraint(
+                name="cable_uniqueness_a_lt_b",
+                fields=["termination_a_id", "termination_b_id"],
+                condition=models.Q(termination_a_id__lt=models.F("termination_b_id")),
+            ),
+            models.UniqueConstraint(
+                name="cable_uniqueness_b_lt_a",
+                fields=["termination_a_id", "termination_b_id"],
+                condition=models.Q(termination_b_id__lt=models.F("termination_a_id")),
+            ),
+        ]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
