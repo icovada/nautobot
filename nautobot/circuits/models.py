@@ -236,7 +236,7 @@ class CircuitTermination(PrimaryModel, PathEndpoint, CableTermination):
     def __str__(self):
         return f"Termination {self.term_side}: {self.location or self.provider_network or self.cloud_network}"
 
-    def save(self, *args, **kwargs) -> None:
+    def clean(self):
         # A valid location for contenttype CircuitTermination must be assigned.
         if self.location is not None:
             if ContentType.objects.get_for_model(self) not in self.location.location_type.content_types.all():
@@ -246,8 +246,7 @@ class CircuitTermination(PrimaryModel, PathEndpoint, CableTermination):
                         f'"{self.location.location_type}"'
                     }
                 )
-
-        return super().save(*args, **kwargs)
+        return super().clean()
 
     def to_objectchange(self, action, related_object=None, **kwargs):
         # Annotate the parent Circuit
