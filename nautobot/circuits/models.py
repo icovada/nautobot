@@ -225,13 +225,11 @@ class CircuitTermination(PrimaryModel, PathEndpoint, CableTermination):
         unique_together = ["circuit", "term_side"]
         constraints = [
             models.CheckConstraint(
-                check=(
-                    models.Q(location__isnull=False, provider_network__isnull=True, cloud_network__isnull=True)
-                    | models.Q(location__isnull=True, provider_network__isnull=False, cloud_network__isnull=True)
-                    | models.Q(location__isnull=True, provider_network__isnull=True, cloud_network__isnull=False)
-                ),
+                check=models.Q(location__isnull=False, provider_network__isnull=True, cloud_network__isnull=True)
+                | models.Q(location__isnull=True, provider_network__isnull=False, cloud_network__isnull=True)
+                | models.Q(location__isnull=True, provider_network__isnull=True, cloud_network__isnull=False),
                 name="circuits_circuittermination_attachment_constraint",
-                violation_error_message="A Circuit Termination can only attach to two elements between Location, Provider Network and Cloud Network",
+                violation_error_message="A Circuit Termination must attach to exactly one of: Location, Provider Network, or Cloud Network",
             )
         ]
 
