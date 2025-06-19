@@ -152,6 +152,13 @@ class CloudNetwork(CloudResourceTypeMixin, PrimaryModel):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.CheckConstraint(
+                check=~models.Q(parent=models.F("id")),
+                name="cloud_network_no_self_parent",
+                violation_error_message="A CloudNetwork may not be its own parent",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -164,8 +171,6 @@ class CloudNetwork(CloudResourceTypeMixin, PrimaryModel):
                 raise ValidationError(
                     {"parent": "A CloudNetwork may not be the child of a CloudNetwork that itself has a parent."}
                 )
-            if self.parent == self:
-                raise ValidationError({"parent": "A CloudNetwork may not be its own parent."})
 
         # TODO: should we enforce that self.cloud_resource_type.provider == self.cloud_account.provider?
 
