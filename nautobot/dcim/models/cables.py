@@ -105,11 +105,11 @@ class Cable(PrimaryModel):
         ]
         constraints = [
             models.CheckConstraint(
-            check=(
-                ~models.Q(termination_a_id=models.F('termination_b_id')) |
-                models.Q(~models.Q(termination_a_type=models.F('termination_b_type')))
-            ),
-            name="dcim_cables_terminations_cannot_be_equal_unless_different_device_types"
+                check=(
+                    ~models.Q(termination_a_id=models.F("termination_b_id"))
+                    | models.Q(~models.Q(termination_a_type=models.F("termination_b_type")))
+                ),
+                name="dcim_cables_terminations_cannot_be_equal_unless_different_device_types",
             ),
         ]
 

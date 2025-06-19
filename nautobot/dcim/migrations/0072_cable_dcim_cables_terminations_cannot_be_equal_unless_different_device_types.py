@@ -4,14 +4,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('dcim', '0071_add_constraint_unique_cables'),
+        ("dcim", "0071_add_constraint_unique_cables"),
     ]
 
     operations = [
         migrations.AddConstraint(
-            model_name='cable',
-            constraint=models.CheckConstraint(check=models.Q(models.Q(('termination_a_id', models.F('termination_b_id')), _negated=True), models.Q(('termination_a_type', models.F('termination_b_type')), _negated=True), _connector='OR'), name='dcim_cables_terminations_cannot_be_equal_unless_different_device_types'),
+            model_name="cable",
+            constraint=models.CheckConstraint(
+                check=models.Q(
+                    models.Q(("termination_a_id", models.F("termination_b_id")), _negated=True),
+                    models.Q(("termination_a_type", models.F("termination_b_type")), _negated=True),
+                    _connector="OR",
+                ),
+                name="dcim_cables_terminations_cannot_be_equal_unless_different_device_types",
+            ),
         ),
     ]
