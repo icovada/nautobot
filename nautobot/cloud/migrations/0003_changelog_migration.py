@@ -8,7 +8,15 @@ from nautobot.extras.migrations.helpers.new_objectchange import make_funcs_for_m
 class Migration(migrations.Migration):
 
     dependencies = [
+        ("circuits", "0023_new_changelog"),
         ("cloud", "0002_new_changelog"),
+        ("dcim", "0073_new_changelog"),
+        ("extras", "0127_new_changelog"),
+        ("ipam", "0053_new_changelog"),
+        ("tenancy", "0010_new_changelog"),
+        ("users", "0011_new_changelog"),
+        ("virtualization", "0031_new_changelog"),
+        ("wireless", "0002_new_changelog"),
     ]
 
     operations = [
