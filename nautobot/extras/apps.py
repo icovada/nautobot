@@ -63,3 +63,11 @@ class ExtrasConfig(NautobotConfig):
 
         register_secrets_provider(EnvironmentVariableSecretsProvider)
         register_secrets_provider(TextFileSecretsProvider)
+
+        # Import all models that use ChangeLogMixin to trigger setup
+        from django.apps import apps
+
+        # Get all models that use ChangeLogMixin
+        for model in apps.get_models():
+            if hasattr(model, "_ensure_changelog_setup"):
+                model._ensure_changelog_setup()
