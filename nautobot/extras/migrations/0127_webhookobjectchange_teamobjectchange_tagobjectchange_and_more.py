@@ -2,13 +2,14 @@
 
 from django.db import migrations, models
 import django.db.models.deletion
+
 from nautobot.extras.migrations.helpers.new_objectchange import make_funcs_for_model
 
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('extras', '0126_objectchange_target_model_name'),
+        ("extras", "0126_objectchange_target_model_name"),
     ]
 
     operations = [
@@ -849,35 +850,35 @@ class Migration(migrations.Migration):
             ],
             bases=("extras.objectchange",),
         ),
-        migrations.RunPython(*make_funcs_for_model("extras", "Webhook")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Team")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Tag")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Status")),
-        migrations.RunPython(*make_funcs_for_model("extras", "StaticGroupAssociation")),
-        migrations.RunPython(*make_funcs_for_model("extras", "SecretsGroup")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Secret")),
-        migrations.RunPython(*make_funcs_for_model("extras", "SavedView")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Role")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Relationship")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ObjectMetadata")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Note")),
-        migrations.RunPython(*make_funcs_for_model("extras", "MetadataType")),
-        migrations.RunPython(*make_funcs_for_model("extras", "MetadataChoice")),
-        migrations.RunPython(*make_funcs_for_model("extras", "JobQueue")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Job")),
-        migrations.RunPython(*make_funcs_for_model("extras", "JobHook")),
-        migrations.RunPython(*make_funcs_for_model("extras", "JobButton")),
-        migrations.RunPython(*make_funcs_for_model("extras", "GraphQLQuery")),
-        migrations.RunPython(*make_funcs_for_model("extras", "GitRepository")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ExternalIntegration")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ExportTemplate")),
-        migrations.RunPython(*make_funcs_for_model("extras", "DynamicGroup")),
-        migrations.RunPython(*make_funcs_for_model("extras", "CustomLink")),
-        migrations.RunPython(*make_funcs_for_model("extras", "CustomField")),
-        migrations.RunPython(*make_funcs_for_model("extras", "CustomFieldChoice")),
-        migrations.RunPython(*make_funcs_for_model("extras", "Contact")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ContactAssociation")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ConfigContextSchema")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ConfigContext")),
-        migrations.RunPython(*make_funcs_for_model("extras", "ComputedField")),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Webhook')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Team')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Tag')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Status')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'StaticGroupAssociation')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'SecretsGroup')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Secret')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'SavedView')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Role')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Relationship')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ObjectMetadata')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Note')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'MetadataType')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'MetadataChoice')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'JobQueue')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Job')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'JobHook')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'JobButton')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'GraphQLQuery')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'GitRepository')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ExternalIntegration')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ExportTemplate')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'DynamicGroup')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'CustomLink')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'CustomField')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'CustomFieldChoice')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'Contact')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ContactAssociation')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ConfigContextSchema')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ConfigContext')),
+        migrations.RunPython(*make_funcs_for_model('extras', 'ComputedField')),
     ]
