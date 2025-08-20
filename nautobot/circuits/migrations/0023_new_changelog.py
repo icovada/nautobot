@@ -3,8 +3,6 @@
 from django.db import migrations, models
 import django.db.models.deletion
 
-from nautobot.extras.migrations.helpers.new_objectchange import make_funcs_for_model
-
 
 class Migration(migrations.Migration):
 
@@ -58,9 +56,4 @@ class Migration(migrations.Migration):
             ],
             bases=('extras.objectchange',),
         ),
-        migrations.RunPython(*make_funcs_for_model('circuits', 'Provider')),
-        migrations.RunPython(*make_funcs_for_model('circuits', 'ProviderNetwork')),
-        migrations.RunPython(*make_funcs_for_model('circuits', 'CircuitType')),
-        migrations.RunPython(*make_funcs_for_model('circuits', 'CircuitTermination')),
-        migrations.RunPython(*make_funcs_for_model('circuits', 'Circuit')),
     ]

@@ -3,13 +3,11 @@
 from django.db import migrations, models
 import django.db.models.deletion
 
-from nautobot.extras.migrations.helpers.new_objectchange import make_funcs_for_model
-
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('extras', '0127_webhookobjectchange_teamobjectchange_tagobjectchange_and_more'),
+        ('extras', '0127_new_changelog'),
         ('dcim', '0072_alter_powerfeed_options_and_more'),
     ]
 
@@ -419,49 +417,4 @@ class Migration(migrations.Migration):
             ],
             bases=('extras.objectchange',),
         ),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'VirtualDeviceContext')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'VirtualChassis')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'SoftwareVersion')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'SoftwareImageFile')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'RearPortTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'RearPort')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'RackReservation')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Rack')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'RackGroup')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'PowerPortTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'PowerPort')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'PowerPanel')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'PowerOutletTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'PowerOutlet')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'PowerFeed')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Platform')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ModuleType')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Module')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ModuleFamily')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ModuleBayTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ModuleBay')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Manufacturer')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'LocationType')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Location')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'InventoryItem')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'InterfaceTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'InterfaceRedundancyGroup')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'InterfaceRedundancyGroupAssociation')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Interface')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'FrontPortTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'FrontPort')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'DeviceTypeToSoftwareImageFile')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'DeviceType')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'DeviceRedundancyGroup')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Device')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'DeviceFamily')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'DeviceBayTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'DeviceBay')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Controller')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ControllerManagedDeviceGroup')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ConsoleServerPortTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ConsoleServerPort')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ConsolePortTemplate')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'ConsolePort')),
-        migrations.RunPython(*make_funcs_for_model('dcim', 'Cable')),
     ]

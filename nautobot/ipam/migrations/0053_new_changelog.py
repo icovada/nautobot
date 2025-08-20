@@ -3,13 +3,11 @@
 from django.db import migrations, models
 import django.db.models.deletion
 
-from nautobot.extras.migrations.helpers.new_objectchange import make_funcs_for_model
-
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('extras', '0127_webhookobjectchange_teamobjectchange_tagobjectchange_and_more'),
+        ('extras', '0127_new_changelog'),
         ('ipam', '0052_alter_ipaddress_index_together_and_more'),
     ]
 
@@ -95,13 +93,4 @@ class Migration(migrations.Migration):
             ],
             bases=('extras.objectchange',),
         ),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'VRF')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'VLAN')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'VLANGroup')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'Service')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'RouteTarget')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'RIR')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'Prefix')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'Namespace')),
-        migrations.RunPython(*make_funcs_for_model('ipam', 'IPAddress')),
     ]

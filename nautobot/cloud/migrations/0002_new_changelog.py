@@ -3,8 +3,6 @@
 from django.db import migrations, models
 import django.db.models.deletion
 
-from nautobot.extras.migrations.helpers.new_objectchange import make_funcs_for_model
-
 
 class Migration(migrations.Migration):
 
@@ -50,8 +48,4 @@ class Migration(migrations.Migration):
             ],
             bases=('extras.objectchange',),
         ),
-        migrations.RunPython(*make_funcs_for_model('cloud', 'CloudService')),
-        migrations.RunPython(*make_funcs_for_model('cloud', 'CloudResourceType')),
-        migrations.RunPython(*make_funcs_for_model('cloud', 'CloudNetwork')),
-        migrations.RunPython(*make_funcs_for_model('cloud', 'CloudAccount')),
     ]
