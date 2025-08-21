@@ -2223,14 +2223,16 @@ class ObjectChangeLogView(generic.GenericView):
 
         # Gather all changes for this object (and its related objects)
         content_type = ContentType.objects.get_for_model(model)
-        objectchanges = (
-            ObjectChange.objects.restrict(request.user, "view")
-            .select_related("user", "changed_object_type")
-            .filter(
-                Q(changed_object_type=content_type, changed_object_id=obj.pk)
-                | Q(related_object_type=content_type, related_object_id=obj.pk)
-            )
-        )
+        # TODO: get related objects as well
+        objectchanges = obj.change_logs.all()
+        # objectchanges = (
+        #     ObjectChange.objects.restrict(request.user, "view")
+        #     .select_related("user", "changed_object_type")
+        #     .filter(
+        #         Q(changed_object_type=content_type, changed_object_id=obj.pk)
+        #         | Q(related_object_type=content_type, related_object_id=obj.pk)
+        #     )
+        # )
         objectchanges_table = tables.ObjectChangeTable(data=objectchanges, orderable=False)
 
         # Apply the request context
