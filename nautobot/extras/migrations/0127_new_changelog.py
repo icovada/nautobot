@@ -11,6 +11,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.AlterField(
+            model_name="objectchange",
+            name="changed_object_id",
+            field=models.UUIDField(db_index=True, null=True),
+        ),
         migrations.CreateModel(
             name="WebhookObjectChange",
             fields=[
