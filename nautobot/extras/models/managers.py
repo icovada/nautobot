@@ -43,6 +43,15 @@ class FastInheritanceQuerySet(FastInheritanceQuerySetMixin, InheritanceQuerySet,
         if self._result_cache is None:
             self._result_cache = list(self._iterable_class(self))
 
+    def get(self, *args: Any, **kwargs: Any) -> FastInheritanceQuerySet:
+        # Bit of an ugly hack: Views call QuerySets, not Models, so we have to call select_subclasses from here
+        # Unfortunately this will JOIN against ALL possible tables nullifying the Fast part of this QuerySet
+        # TODO: make Fast again
+
+        return self.select_subclasses()._superget(*args, **kwargs)
+
+    def _superget(self, *args: Any, **kwargs: Any) -> FastInheritanceQuerySet:
+        return super().get(*args, **kwargs)
 
 class FastInheritanceManagerMixin(InheritanceManagerMixin):
     _queryset_class = FastInheritanceQuerySet

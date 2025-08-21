@@ -234,7 +234,7 @@ def web_request_context(
         last_content_type = None
         # enqueue jobhooks and webhooks, use change_context.change_id in case change_id was not supplied
         for oc in (
-            ObjectChange.objects.select_related("changed_object_type", "user")
+            ObjectChange.objects.select_related("changed_object", "user")
             .filter(request_id=change_context.change_id)
             .order_by("time")  # default ordering is -time but we want oldest first not newest first
             .iterator()
