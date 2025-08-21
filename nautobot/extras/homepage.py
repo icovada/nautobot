@@ -19,8 +19,6 @@ def get_changelog(request):
         "id",
         "action",
         "changed_object",
-        "changed_object_id",
-        "changed_object_type",
         "object_repr",
         "user_name",
         "time",

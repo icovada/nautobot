@@ -1,4 +1,5 @@
 from threading import local
+from typing import Any
 
 from django.apps import apps
 from django.conf import settings
@@ -97,7 +98,7 @@ class ChangeLoggedModel(models.Model):
                 parent_link=True,
                 related_name=target_model_name
             ),
-            'fktarget': models.ForeignKey(
+            'changed_object': models.ForeignKey(
                 cls,
                 on_delete=models.SET_NULL,
                 related_name='change_logs',
@@ -164,7 +165,7 @@ class ChangeLoggedModel(models.Model):
                 old_values=old_values,
                 new_values=new_values,
                 changed_fields=changed_fields,
-                fktarget=instance,
+                changed_object=instance,
                 target_uuid=instance.id,
                 target_model_name=target_model_name,
             )
@@ -291,8 +292,6 @@ class ObjectChange(BaseModel):
     request_id = models.UUIDField(editable=False, db_index=True)
     action = models.CharField(max_length=50, choices=ObjectChangeActionChoices)
     changed_object_type = models.ForeignKey(to=ContentType, on_delete=models.SET_NULL, null=True, related_name="+")
-    changed_object_id = models.UUIDField(db_index=True)
-    changed_object = GenericForeignKey(ct_field="changed_object_type", fk_field="changed_object_id")
     change_context = models.CharField(
         max_length=50,
         choices=ObjectChangeEventContextChoices,
@@ -326,38 +325,26 @@ class ObjectChange(BaseModel):
         # as a single bulk-create or bulk-edit REST API request may modify the same object multiple times, such as in
         # the case of creating CircuitTerminations for both ends of a single Circuit in a single request.
         unique_together = [
-            ["time", "request_id", "changed_object_type", "changed_object_id"],
+            ["time", "request_id", "changed_object_type"],
         ]
         indexes = [
             models.Index(
                 name="extras_objectchange_triple_idx",
-                fields=["request_id", "changed_object_type_id", "changed_object_id"],
-            ),
-            models.Index(
-                name="extras_objectchange_double_idx",
                 fields=["request_id", "changed_object_type_id"],
-            ),
-            models.Index(
-                name="extras_objectchange_rtime_idx",
-                fields=["-time"],
-            ),
-            models.Index(
-                name="changed_object_idx",
-                fields=["changed_object_type", "changed_object_id"],
             ),
             models.Index(
                 name="related_object_idx",
                 fields=["related_object_type", "related_object_id"],
             ),
             models.Index(
-                name="user_changed_object_idx",
-                fields=["user", "changed_object_type", "changed_object_id"],
-            ),
-            models.Index(
-                name="user_name_changed_object_idx",
-                fields=["user_name", "changed_object_type", "changed_object_id"],
+                name="user_changed_object_typex",
+                fields=["user", "changed_object_type"],
             ),
         ]
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.upgraded_to_subclass = False
+        super().__init__(*args, **kwargs)
 
     def __str__(self):
         return f"{self.changed_object_type} {self.object_repr} {self.get_action_display().lower()} by {self.user_name}"

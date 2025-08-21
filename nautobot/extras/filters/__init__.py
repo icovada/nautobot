@@ -1243,7 +1243,6 @@ class ObjectChangeFilterSet(BaseFilterSet):
             "request_id",
             "action",
             "changed_object_type_id",
-            "changed_object_id",
             "object_repr",
             "time",
         ]

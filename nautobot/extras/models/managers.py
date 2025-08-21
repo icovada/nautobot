@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from model_utils.managers import (
     InheritanceManager,
@@ -10,6 +11,8 @@ from model_utils.managers import (
     InheritanceQuerySetMixin,
 )
 
+from nautobot.core.models.querysets import RestrictedQuerySet
+
 ModelT = TypeVar("ModelT", bound=models.Model, covariant=True)
 
 
@@ -17,8 +20,8 @@ class FastInheritanceQuerySetMixin(InheritanceQuerySetMixin, models.QuerySet):
     def select_subclasses(self, *subclasses: str | type[models.Model]) -> InheritanceQuerySet:
         if not subclasses:
             selected_subclasses = {
-                x["target_model_name"]
-                for x in self.values("target_model_name").distinct("target_model_name").order_by("target_model_name")
+                f"{ContentType.objects.get_for_id(x['changed_object_type']).app_label}_{ContentType.objects.get_for_id(x['changed_object_type']).model}changelog".lower()
+                for x in self.values("changed_object_type").distinct("changed_object_type").order_by("changed_object_type")
             }
             try:
                 # During the migration there will be a moment when the target_model_name column is empty and
@@ -35,7 +38,7 @@ class FastInheritanceQuerySetMixin(InheritanceQuerySetMixin, models.QuerySet):
             return self
 
 
-class FastInheritanceQuerySet(FastInheritanceQuerySetMixin, InheritanceQuerySet): ...
+class FastInheritanceQuerySet(FastInheritanceQuerySetMixin, InheritanceQuerySet, RestrictedQuerySet): ...
 
 
 class FastInheritanceManagerMixin(InheritanceManagerMixin):
@@ -45,13 +48,16 @@ class FastInheritanceManagerMixin(InheritanceManagerMixin):
 class FastInheritanceManager(FastInheritanceManagerMixin, InheritanceManager):
     @classmethod
     def _find_subclass(cls, obj):
-        return getattr(obj, obj.target_model_name)
+        return getattr(obj, f"{obj.changed_object_type.app_label}_{obj.changed_object_type.model}changelog")
 
     def all(self) -> InheritanceQuerySet:
         return super().all().select_subclasses()
 
     def filter(self, *args: Any, **kwargs: Any) -> InheritanceQuerySet:
         return super().filter(*args, **kwargs).select_subclasses()
+
+    def restrict(self, *args: Any, **kwargs: Any) -> InheritanceQuerySet:
+        return super().restrict(*args, **kwargs).select_subclasses()
 
     def exclude(self, *args: Any, **kwargs: Any) -> InheritanceQuerySet:
         return super().exclude(*args, **kwargs).select_subclasses()
@@ -69,7 +75,7 @@ class FastInheritanceManager(FastInheritanceManagerMixin, InheritanceManager):
         return self.select_subclasses().values(*args, **kwargs)
 
     def select_related(self, *fields: Any) -> InheritanceQuerySet:
-        if "fktarget" in fields:
+        if "changed_object" in fields:
             fields = []
             # Cycle through all model fields
             for field in self.model._meta.get_fields():
