@@ -833,8 +833,6 @@
   Public Interface: "nautobot.apps.utils.swap_status_initials"
 - Nautobot Location: "nautobot.core.utils.logging.sanitize"
   Public Interface: "nautobot.apps.utils.sanitize"
-- Nautobot Location: "nautobot.core.utils.lookup.get_changes_for_model"
-  Public Interface: "nautobot.apps.utils.get_changes_for_model"
 - Nautobot Location: "nautobot.core.utils.lookup.get_filterset_for_model"
   Public Interface: "nautobot.apps.utils.get_filterset_for_model"
 - Nautobot Location: "nautobot.core.utils.lookup.get_form_for_model"

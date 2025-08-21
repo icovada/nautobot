@@ -744,7 +744,7 @@ class APIViewTestCases:
 
                 # Verify ObjectChange creation
                 if hasattr(self.model, "to_objectchange"):
-                    objectchanges = lookup.get_changes_for_model(instance)
+                    objectchanges = instance.change_logs.all()
                     self.assertEqual(len(objectchanges), 1)
                     self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_CREATE)
 
@@ -939,7 +939,7 @@ class APIViewTestCases:
             # Verify ObjectChange creation -- yes, even though nothing actually changed
             # TODO: This may change (hah) at some point -- see https://github.com/nautobot/nautobot/issues/3321
             if hasattr(self.model, "to_objectchange"):
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_UPDATE)
                 objectchanges.delete()
 
@@ -961,7 +961,7 @@ class APIViewTestCases:
 
             # Verify ObjectChange creation
             if hasattr(self.model, "to_objectchange"):
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_UPDATE)
 
             # Verify that a PATCH with ?exclude_m2m=true correctly excludes many-to-many fields from the response
@@ -1139,7 +1139,7 @@ class APIViewTestCases:
 
             # Verify ObjectChange creation
             if hasattr(self.model, "to_objectchange"):
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_DELETE)
 
         def test_bulk_delete_objects(self):

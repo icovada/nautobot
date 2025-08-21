@@ -13,23 +13,6 @@ from django.utils.module_loading import import_string
 from django.views.generic.base import RedirectView
 
 
-def get_changes_for_model(model):
-    """
-    Return a queryset of ObjectChanges for a model or instance. The queryset will be filtered
-    by the model class. If an instance is provided, the queryset will also be filtered by the instance id.
-    """
-    from nautobot.extras.models import ObjectChange  # prevent circular import
-
-    if isinstance(model, Model):
-        return ObjectChange.objects.filter(
-            changed_object_type=ContentType.objects.get_for_model(model._meta.model),
-            changed_object_id=model.pk,
-        )
-    if issubclass(model, Model):
-        return ObjectChange.objects.filter(changed_object_type=ContentType.objects.get_for_model(model._meta.model))
-    raise TypeError(f"{model!r} is not a Django Model class or instance")
-
-
 def get_model_from_name(model_name):
     """Given a full model name in dotted format (example: `dcim.model`), a model class is returned if valid.
 
@@ -75,6 +58,8 @@ def get_route_for_model(model, action, api=False):
         "plugins-api:example_app-api:examplemodel-list"
     """
 
+    from nautobot.extras.models.change_logging import ObjectChange
+
     if isinstance(model, str):
         model = get_model_from_name(model)
 
@@ -89,6 +74,10 @@ def get_route_for_model(model, action, api=False):
         app_label = model._meta.app_label
     prefix = f"{app_label}{suffix}:{model._meta.model_name}"
     sep = ""
+
+    if isinstance(model, ObjectChange):
+        prefix = f"extras{suffix}:objectchange"
+
     if action != "":
         sep = "_" if not api else "-"
     viewname = f"{prefix}{sep}{action}"
@@ -310,21 +299,27 @@ def get_created_and_last_updated_usernames_for_model(instance):
     from nautobot.extras.choices import ObjectChangeActionChoices
     from nautobot.extras.models import ObjectChange
 
-    object_change_records = get_changes_for_model(instance)
     created_by = None
     last_updated_by = None
-    try:
-        created_by_record = (
-            object_change_records.filter(action=ObjectChangeActionChoices.ACTION_CREATE).only("user_name").first()
-        )
-        if created_by_record is not None:
-            created_by = created_by_record.user_name
-    except ObjectChange.DoesNotExist:
-        pass
 
-    last_updated_by_record = object_change_records.only("user_name").first()
-    if last_updated_by_record:
-        last_updated_by = last_updated_by_record.user_name
+    if isinstance(instance, ObjectChange):
+        created_by = instance.user
+        last_updated_by = instance.time
+
+    else:
+        object_change_records = instance.change_logs.all()
+        try:
+            created_by_record = (
+                object_change_records.filter(action=ObjectChangeActionChoices.ACTION_CREATE).only("user").first()
+            )
+            if created_by_record is not None:
+                created_by = created_by_record.user
+        except ObjectChange.DoesNotExist:
+            pass
+
+        last_updated_by_record = object_change_records.only("user").first()
+        if last_updated_by_record:
+            last_updated_by = last_updated_by_record.user
 
     return created_by, last_updated_by
 

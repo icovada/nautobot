@@ -84,7 +84,7 @@ class ChangeLoggedModel(models.Model):
 
         # Get name of object model this changelog refers to
         # eg. this is a DeviceObjectChange, we want normal_device
-        target_model_name = f"{cls._meta.app_label}_{cls.__name__}changelog".lower()
+        target_model_name = f"_{cls._meta.app_label}_{cls.__name__}changelog".lower()
 
         # Create the relationship model
         attrs = {
@@ -138,7 +138,7 @@ class ChangeLoggedModel(models.Model):
         @receiver(post_save, sender=cls, weak=False)
         def post_save_handler(sender, instance, created, **kwargs):
 
-            target_model_name = f"{cls._meta.app_label}_{cls.__name__}changelog".lower()
+            target_model_name = f"_{cls._meta.app_label}_{cls.__name__}changelog".lower()
 
             # Get user from thread local if available
             user = getattr(_thread_local, 'user', None)
@@ -174,7 +174,7 @@ class ChangeLoggedModel(models.Model):
         def post_delete_handler(sender, instance, **kwargs):
             user = getattr(_thread_local, 'user', None)
 
-            target_model_name = f"{cls._meta.app_label}_{cls.__name__}changelog".lower()
+            target_model_name = f"_{cls._meta.app_label}_{cls.__name__}changelog".lower()
 
             # Create the ObjectChange entry for deletion
             rel_model: models.Model | type[_] = cls._get_changelog_rel_model()
@@ -349,6 +349,14 @@ class ObjectChange(BaseModel):
     def __str__(self):
         return f"{self.changed_object_type} {self.object_repr} {self.get_action_display().lower()} by {self.user_name}"
 
+    # @property
+    # def changed_object(self):
+    #     if value := getattr(self, "changed_object_id", None):
+    #         return value
+    #     else:
+    #         attr_name = f"_{ContentType.objects.get_for_id(self.changed_object_type_id).app_label}_{ContentType.objects.get_for_id(self.changed_object_type_id).model}changelog".lower()
+    #         return getattr(self, attr_name).changed_object
+
     def save(self, *args, **kwargs):
         # Record the user's name and the object's representation as static strings
         if not self.user_name:
@@ -381,10 +389,8 @@ class ObjectChange(BaseModel):
 
     def get_related_changes(self, user=None, permission="view"):
         """Return queryset of all ObjectChanges for this changed object, excluding this ObjectChange"""
-        related_changes = ObjectChange.objects.filter(
-            changed_object_type=self.changed_object_type,
-            changed_object_id=self.changed_object_id,
-        ).exclude(pk=self.pk)
+        related_changes = self.changed_object.change_logs.exclude(pk=self.pk)
+
         if user is not None:
             return related_changes.restrict(user, permission)
         return related_changes

@@ -381,7 +381,7 @@ class ViewTestCases:
 
             if hasattr(self.model, "to_objectchange"):
                 # Verify ObjectChange creation
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(len(objectchanges), 1)
                 # Assert that Created By table row is updated with the user that created the object
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_CREATE)
@@ -521,7 +521,7 @@ class ViewTestCases:
 
             if hasattr(self.model, "to_objectchange"):
                 # Verify ObjectChange creation
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_UPDATE)
                 # Validate if detail view exists
                 validate = URLValidator()
@@ -642,7 +642,7 @@ class ViewTestCases:
 
             if hasattr(self.model, "to_objectchange"):
                 # Verify ObjectChange creation
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_DELETE)
 
             if hasattr(self.model, "notes") and isinstance(instance.notes, extras_querysets.NotesQuerySet):
@@ -679,7 +679,7 @@ class ViewTestCases:
 
             if hasattr(self.model, "to_objectchange"):
                 # Verify ObjectChange creation
-                objectchanges = lookup.get_changes_for_model(instance)
+                objectchanges = instance.change_logs.all()
                 self.assertEqual(objectchanges[0].action, extras_choices.ObjectChangeActionChoices.ACTION_DELETE)
 
         @override_settings(EXEMPT_VIEW_PERMISSIONS=["*"])

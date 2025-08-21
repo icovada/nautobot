@@ -25,7 +25,6 @@ from nautobot.core.utils.filtering import (
 from nautobot.core.utils.git import BranchDoesNotExist, convert_git_diff_log_to_list, GitRepo, swap_status_initials
 from nautobot.core.utils.logging import sanitize
 from nautobot.core.utils.lookup import (
-    get_changes_for_model,
     get_filterset_for_model,
     get_form_for_model,
     get_model_from_name,
@@ -97,7 +96,6 @@ __all__ = (
     "get_all_lookup_expr_for_field",
     "get_base_template",
     "get_celery_queues",
-    "get_changes_for_model",
     "get_filter_field_label",
     "get_filterable_params_from_filter_params",
     "get_filterset_field",

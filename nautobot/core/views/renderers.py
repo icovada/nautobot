@@ -110,15 +110,7 @@ class NautobotHTMLRenderer(renderers.BrowsableAPIRenderer):
                 table = table_class(obj.notes, user=request.user)
             elif view.action == "changelog":
                 obj = kwargs.get("object")
-                content_type = kwargs.get("content_type")
-                objectchanges = (
-                    ObjectChange.objects.restrict(request.user, "view")
-                    .prefetch_related("user", "changed_object_type")
-                    .filter(
-                        Q(changed_object_type=content_type, changed_object_id=obj.pk)
-                        | Q(related_object_type=content_type, related_object_id=obj.pk)
-                    )
-                )
+                objectchanges = obj.change_logs.all()
                 table = table_class(data=objectchanges, orderable=False)
 
             # Apply the request context

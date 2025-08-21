@@ -20,7 +20,7 @@ class FastInheritanceQuerySetMixin(InheritanceQuerySetMixin, models.QuerySet):
     def select_subclasses(self, *subclasses: str | type[models.Model]) -> InheritanceQuerySet:
         if not subclasses:
             selected_subclasses = {
-                f"{ContentType.objects.get_for_id(x['changed_object_type']).app_label}_{ContentType.objects.get_for_id(x['changed_object_type']).model}changelog".lower()
+                f"_{ContentType.objects.get_for_id(x['changed_object_type']).app_label}_{ContentType.objects.get_for_id(x['changed_object_type']).model}changelog".lower()
                 for x in self.values("changed_object_type").distinct("changed_object_type").order_by("changed_object_type")
             }
             try:
@@ -38,7 +38,10 @@ class FastInheritanceQuerySetMixin(InheritanceQuerySetMixin, models.QuerySet):
             return self
 
 
-class FastInheritanceQuerySet(FastInheritanceQuerySetMixin, InheritanceQuerySet, RestrictedQuerySet): ...
+class FastInheritanceQuerySet(FastInheritanceQuerySetMixin, InheritanceQuerySet, RestrictedQuerySet):
+    def _fetch_all(self):
+        if self._result_cache is None:
+            self._result_cache = list(self._iterable_class(self))
 
 
 class FastInheritanceManagerMixin(InheritanceManagerMixin):
@@ -48,7 +51,7 @@ class FastInheritanceManagerMixin(InheritanceManagerMixin):
 class FastInheritanceManager(FastInheritanceManagerMixin, InheritanceManager):
     @classmethod
     def _find_subclass(cls, obj):
-        return getattr(obj, f"{obj.changed_object_type.app_label}_{obj.changed_object_type.model}changelog")
+        return getattr(obj, f"_{obj.changed_object_type.app_label}_{obj.changed_object_type.model}changelog")
 
     def all(self) -> InheritanceQuerySet:
         return super().all().select_subclasses()
