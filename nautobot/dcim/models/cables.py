@@ -103,10 +103,15 @@ class Cable(PrimaryModel):
             "termination_b_type",
             "termination_b_id",
         ]
-        unique_together = (
-            ("termination_a_type", "termination_a_id"),
-            ("termination_b_type", "termination_b_id"),
-        )
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    ~models.Q(termination_a_id=models.F("termination_b_id"))
+                    | models.Q(~models.Q(termination_a_type=models.F("termination_b_type")))
+                ),
+                name="dcim_cables_terminations_cannot_be_equal_unless_different_device_types",
+            ),
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

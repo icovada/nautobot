@@ -53,6 +53,7 @@ class BaseModel(models.Model):
     is_metadata_associable_model = True
     is_saved_view_model = False  # SavedViewMixin overrides this to default True
     is_cloud_resource_type_model = False  # CloudResourceTypeMixin overrides this to default True
+    _is_clean: bool
 
     associated_object_metadata = GenericRelation(
         "extras.ObjectMetadata",
@@ -63,6 +64,17 @@ class BaseModel(models.Model):
 
     class Meta:
         abstract = True
+
+    def save(self, *args, **kwargs) -> None:
+        if not self._is_clean:
+            self.clean()
+
+        res = super().save(*args, **kwargs)
+
+        # Set back to unclean in case of another save
+        self._is_clean = False
+
+        return res
 
     def get_absolute_url(self, api=False):
         """
@@ -86,6 +98,18 @@ class BaseModel(models.Model):
                     continue
 
         raise AttributeError(f"Cannot find a URL for {self} ({self._meta.app_label}.{self._meta.model_name})")
+
+    def __init__(self, *args, **kwargs) -> None:
+        self._is_clean = False
+        super().__init__(*args, **kwargs)
+
+    def clean(self) -> None:
+        self._is_clean = True
+        return super().clean()
+
+    def refresh_from_db(self, *args, **kwargs) -> None:
+        self._is_clean = False
+        return super().refresh_from_db(*args, **kwargs)
 
     @property
     def present_in_database(self):
