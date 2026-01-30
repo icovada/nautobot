@@ -575,6 +575,7 @@ class RackForm(LocatableModelFormMixin, NautobotModelForm, TenancyForm):
         }
 
     def clean(self):
+        super().clean()
         cleaned_data = self.cleaned_data
         location = cleaned_data.get("location")
 
@@ -596,7 +597,6 @@ class RackForm(LocatableModelFormMixin, NautobotModelForm, TenancyForm):
                         "would conflict with same-named devices in this rack."
                     }
                 )
-        return super().clean()
 
 
 class RackBulkEditForm(
@@ -2631,6 +2631,8 @@ class ModuleForm(LocatableModelFormMixin, NautobotModelForm, TenancyForm):
                 pass
 
     def clean(self):
+        super().clean()
+
         cleaned_data = self.cleaned_data
         if cleaned_data["parent_module_bay_device"] and cleaned_data["parent_module_bay_module"]:
             raise forms.ValidationError("Multiple parent module bays selected.")
