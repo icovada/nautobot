@@ -350,7 +350,14 @@ class CableTermination(PolymorphicModel, PrimaryModel):
             node_id = row[0]
             # Polymorphic query returns the actual subclass instance
             try:
-                return CableTermination.objects.get(pk=node_id)
+                instance = CableTermination.objects.get(pk=node_id)
+                # If we got the base class instead of the subclass, fetch it explicitly
+                if type(instance) is CableTermination and hasattr(instance, 'polymorphic_ctype'):
+                    # Get the actual model class from the content type
+                    model_class = instance.polymorphic_ctype.model_class()
+                    if model_class and model_class != CableTermination:
+                        return model_class.objects.get(pk=node_id)
+                return instance
             except CableTermination.DoesNotExist:
                 return None
         return None
@@ -439,11 +446,15 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         cable_ids = [uuid.UUID(x) for x in row[1].split(",")]
         cable_end_ids = [uuid.UUID(x) for x in row[2].split(",")]
 
-        # Fetch all objects in bulk
-        nodes_by_id = {
-            obj.pk: obj
-            for obj in CableTermination.objects.filter(pk__in=node_ids)
-        }
+        # Fetch all objects in bulk - ensure we get actual subclasses
+        nodes_by_id = {}
+        for obj in CableTermination.objects.filter(pk__in=node_ids):
+            # If we got the base class, fetch the actual subclass
+            if type(obj) is CableTermination and hasattr(obj, 'polymorphic_ctype'):
+                model_class = obj.polymorphic_ctype.model_class()
+                if model_class and model_class != CableTermination:
+                    obj = model_class.objects.get(pk=obj.pk)
+            nodes_by_id[obj.pk] = obj
         cables_by_id = {obj.pk: obj for obj in Cable.objects.filter(pk__in=cable_ids)}
         cable_ends_by_id = {
             obj.pk: obj
@@ -479,14 +490,23 @@ class CableTermination(PolymorphicModel, PrimaryModel):
 
         return result
 
-    @property
-    def parent(self):
+    def get_absolute_url(self, api=False):
         """
-        Convenience property - used in template rendering among other cases.
+        Return the absolute URL for this CableTermination.
+        Since CableTermination is polymorphic, delegate to the actual subclass instance.
+        """
+        # If this is already the polymorphic subclass, call parent's get_absolute_url
+        if type(self) is not CableTermination:
+            return super().get_absolute_url(api=api)
 
-        Could be a Device, a Circuit, a PowerPanel, etc.
-        """
-        raise NotImplementedError("Class didn't implement 'parent' property")
+        # If this is the base CableTermination class, we shouldn't have a direct URL
+        # This can happen if the polymorphic type is not loaded correctly
+        # Raise an error to help debug the issue
+        raise AttributeError(
+            f"CableTermination base class does not have a URL. "
+            f"Ensure queries use the polymorphic manager to get the correct subclass. "
+            f"Instance: {self} (pk={self.pk}, polymorphic_ctype={self.polymorphic_ctype})"
+        )
 
 
 class PathEndpoint(models.Model):
