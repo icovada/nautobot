@@ -121,7 +121,6 @@ GLOBAL_SEARCH_EXCLUDE_LIST = [
     "approvalworkflowstage",
     "approvalworkflowstagedefinition",
     "approvalworkflowstageresponse",
-    "cablepath",
     "circuittermination",
     "circuittype",
     "clustergroup",

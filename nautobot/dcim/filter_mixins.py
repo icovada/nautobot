@@ -158,9 +158,9 @@ class PathEndpointModelFilterSetMixin(django_filters.FilterSet):
 
     def filter_connected(self, queryset, name, value):
         if value:
-            return queryset.filter(_path__is_active=True)
+            return queryset.filter(cable__isnull=False)
         else:
-            return queryset.filter(Q(_path__isnull=True) | Q(_path__is_active=False))
+            return queryset.filter(cable__isnull=True)
 
 
 class DeviceModuleCommonFiltersMixin(django_filters.FilterSet):

@@ -1,11 +1,9 @@
-from collections import defaultdict
 import logging
 
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
-from django.db.models import Sum
 from django.utils.functional import classproperty
 
 from nautobot.core.constants import CHARFIELD_MAX_LENGTH
@@ -13,12 +11,6 @@ from nautobot.core.models.fields import ColorField
 from nautobot.core.utils.data import to_meters
 from nautobot.dcim.choices import CableLengthUnitChoices, CableTypeChoices
 from nautobot.dcim.constants import CABLE_TERMINATION_MODELS, COMPATIBLE_TERMINATION_TYPES, NONCONNECTABLE_IFACE_TYPES
-from nautobot.dcim.fields import JSONPathField
-from nautobot.dcim.utils import (
-    decompile_path_node,
-    object_to_path_node,
-    path_node_to_object,
-)
 from nautobot.extras.models import Status, StatusField
 from nautobot.extras.utils import extras_features
 
@@ -28,13 +20,12 @@ from nautobot.extras.utils import extras_features
 # would be the much more invasive but much more "correct" fix.
 from nautobot.core.models.generics import BaseModel, PrimaryModel  # isort: skip
 
-from .device_components import FrontPort, RearPort
+from .device_components import RearPort
 from .devices import Device
 
 __all__ = (
     "Cable",
     "CableEnd",
-    "CablePath",
 )
 
 logger = logging.getLogger(__name__)
@@ -322,202 +313,3 @@ class CableEnd(BaseModel):
 
     def __str__(self):
         return f"{self.cable} - side {self.cable_side} - position {self.position}"
-
-
-@extras_features("graphql")
-class CablePath(BaseModel):
-    """
-    A CablePath instance represents the physical path from an origin to a destination, including all intermediate
-    elements in the path. Every instance must specify an `origin`, whereas `destination` may be null (for paths which do
-    not terminate on a PathEndpoint).
-
-    `path` contains a list of nodes within the path, each represented by a tuple of (type, ID). The first element in the
-    path must be a Cable instance, followed by a pair of pass-through ports. For example, consider the following
-    topology:
-
-                     1                              2                              3
-        Interface A --- Front Port A | Rear Port A --- Rear Port B | Front Port B --- Interface B
-
-    This path would be expressed as:
-
-    CablePath(
-        origin = Interface A
-        destination = Interface B
-        path = [Cable 1, Front Port A, Rear Port A, Cable 2, Rear Port B, Front Port B, Cable 3]
-    )
-
-    `is_active` is set to True only if 1) `destination` is not null, and 2) every Cable within the path has a status of
-    "connected".
-    """
-
-    origin_type = models.ForeignKey(to=ContentType, on_delete=models.CASCADE, related_name="+")
-    origin_id = models.UUIDField()
-    origin = GenericForeignKey(ct_field="origin_type", fk_field="origin_id")
-    destination_type = models.ForeignKey(
-        to=ContentType,
-        on_delete=models.CASCADE,
-        related_name="+",
-        blank=True,
-        null=True,
-    )
-    destination_id = models.UUIDField(blank=True, null=True)
-    destination = GenericForeignKey(ct_field="destination_type", fk_field="destination_id")
-    # TODO: Profile filtering on this field if it could benefit from an index
-    path = JSONPathField()
-    is_active = models.BooleanField(default=False)
-    is_split = models.BooleanField(default=False)
-    # `CablePathSerializer` currently does not inherit from `BaseModelSerializer`
-    # thus it does not have `object_type` field needed for the `assigned_object` field using `PolymorphicProxySerializer`.
-    is_metadata_associable_model = False
-
-    natural_key_field_names = ["pk"]
-
-    class Meta:
-        unique_together = ("origin_type", "origin_id")
-
-    def __str__(self):
-        status = " (active)" if self.is_active else " (split)" if self.is_split else ""
-        return f"Path #{self.pk}: {self.origin} to {self.destination} via {len(self.path)} nodes{status}"
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-
-        # Record a direct reference to this CablePath on its originating object
-        model = self.origin._meta.model
-        model.objects.filter(pk=self.origin.pk).update(_path=self.pk)
-
-    @property
-    def segment_count(self):
-        total_length = 1 + len(self.path) + (1 if self.destination else 0)
-        return int(total_length / 3)
-
-    @classmethod
-    def from_origin(cls, origin):
-        """
-        Create a new CablePath instance as traced from the given path origin.
-        """
-        if origin is None or origin.cable is None:
-            return None
-
-        # Import added here to avoid circular imports with Cable.
-        from nautobot.circuits.models import CircuitTermination
-
-        destination = None
-        path = []
-        position_stack = []
-        is_active = True
-        is_split = False
-
-        node = origin
-        visited_nodes = set()
-        while node.cable is not None:
-            if node.id in visited_nodes:
-                raise ValidationError("a loop is detected in the path")
-            visited_nodes.add(node.id)
-            if node.cable.status != Cable.STATUS_CONNECTED:
-                is_active = False
-
-            # Follow the cable to its far-end termination
-            path.append(object_to_path_node(node.cable))
-            peer_termination = node.get_cable_peer()
-
-            # Follow a FrontPort to its corresponding RearPort
-            if isinstance(peer_termination, FrontPort):
-                path.append(object_to_path_node(peer_termination))
-                node = peer_termination.rear_port
-                if node.positions > 1:
-                    position_stack.append(peer_termination.rear_port_position)
-                path.append(object_to_path_node(node))
-
-            # Follow a RearPort to its corresponding FrontPort (if any)
-            elif isinstance(peer_termination, RearPort):
-                path.append(object_to_path_node(peer_termination))
-
-                # Determine the peer FrontPort's position
-                if peer_termination.positions == 1:
-                    position = 1
-                elif position_stack:
-                    position = position_stack.pop()
-                else:
-                    # No position indicated: path has split, so we stop at the RearPort
-                    is_split = True
-                    break
-
-                try:
-                    node = FrontPort.objects.get(rear_port=peer_termination, rear_port_position=position)
-                    path.append(object_to_path_node(node))
-                except ObjectDoesNotExist:
-                    # No corresponding FrontPort found for the RearPort
-                    break
-
-            # Follow a Circuit Termination if there is a corresponding Circuit Termination
-            # Side A and Side Z exist
-            elif isinstance(peer_termination, CircuitTermination):
-                node = peer_termination.get_peer_termination()
-                # A Circuit Termination does not require a peer.
-                if node is None:
-                    destination = peer_termination
-                    break
-                path.append(object_to_path_node(peer_termination))
-                path.append(object_to_path_node(node))
-
-            # Anything else marks the end of the path
-            else:
-                destination = peer_termination
-                break
-
-        if destination is None:
-            is_active = False
-
-        return cls(
-            origin=origin,
-            destination=destination,
-            path=path,
-            is_active=is_active,
-            is_split=is_split,
-        )
-
-    def get_path(self):
-        """
-        Return the path as a list of prefetched objects.
-        """
-        # Compile a list of IDs to prefetch for each type of model in the path
-        to_prefetch = defaultdict(list)
-        for node in self.path:
-            ct_id, object_id = decompile_path_node(node)
-            to_prefetch[ct_id].append(object_id)
-
-        # Prefetch path objects using one query per model type. Prefetch related devices where appropriate.
-        prefetched = {}
-        for ct_id, object_ids in to_prefetch.items():
-            model_class = ContentType.objects.get_for_id(ct_id).model_class()
-            queryset = model_class.objects.filter(pk__in=object_ids)
-            if hasattr(model_class, "device"):
-                queryset = queryset.prefetch_related("device")
-            prefetched[ct_id] = {obj.id: obj for obj in queryset}
-
-        # Replicate the path using the prefetched objects.
-        path = []
-        for node in self.path:
-            ct_id, object_id = decompile_path_node(node)
-            path.append(prefetched[ct_id][object_id])
-
-        return path
-
-    def get_total_length(self):
-        """
-        Return the sum of the length of each cable in the path.
-        """
-        cable_ids = [
-            # Starting from the first element, every third element in the path should be a Cable
-            decompile_path_node(self.path[i])[1]
-            for i in range(0, len(self.path), 3)
-        ]
-        return Cable.objects.filter(id__in=cable_ids).aggregate(total=Sum("_abs_length"))["total"]
-
-    def get_split_nodes(self):
-        """
-        Return all available next segments in a split cable path.
-        """
-        rearport = path_node_to_object(self.path[-1])
-        return FrontPort.objects.filter(rear_port=rearport)

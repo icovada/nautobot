@@ -1,5 +1,3 @@
-import contextlib
-
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from drf_spectacular.utils import extend_schema_field
@@ -53,7 +51,6 @@ from nautobot.dcim.choices import (
 from nautobot.dcim.constants import CABLE_TERMINATION_MODELS, RACK_ELEVATION_LEGEND_WIDTH_DEFAULT
 from nautobot.dcim.models import (
     Cable,
-    CablePath,
     CableTermination,
     ConsolePort,
     ConsolePortTemplate,
@@ -144,9 +141,9 @@ class PathEndpointModelSerializerMixin(ValidatedModelSerializer):
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_connected_endpoint_type(self, obj):
-        with contextlib.suppress(CablePath.DoesNotExist):
-            if obj._path is not None and obj._path.destination is not None:
-                return f"{obj._path.destination._meta.app_label}.{obj._path.destination._meta.model_name}"
+        endpoint = obj.connected_endpoint
+        if endpoint is not None:
+            return f"{endpoint._meta.app_label}.{endpoint._meta.model_name}"
         return None
 
     @extend_schema_field(
@@ -161,20 +158,18 @@ class PathEndpointModelSerializerMixin(ValidatedModelSerializer):
         """
         Return the appropriate serializer for the type of connected object.
         """
-        with contextlib.suppress(CablePath.DoesNotExist):
-            if obj._path is not None and obj._path.destination is not None:
-                depth = get_nested_serializer_depth(self)
-                return return_nested_serializer_data_based_on_depth(
-                    self, depth, obj, obj._path.destination, "connected_endpoint"
-                )
+        endpoint = obj.connected_endpoint
+        if endpoint is not None:
+            depth = get_nested_serializer_depth(self)
+            return return_nested_serializer_data_based_on_depth(
+                self, depth, obj, endpoint, "connected_endpoint"
+            )
         return None
 
     @extend_schema_field(serializers.BooleanField(allow_null=True))
     def get_connected_endpoint_reachable(self, obj):
-        with contextlib.suppress(CablePath.DoesNotExist):
-            if obj._path is not None:
-                return obj._path.is_active
-        return None
+        # An endpoint is reachable if connected_endpoint returns a value
+        return obj.connected_endpoint is not None
 
 
 class ModularDeviceComponentTemplateSerializerMixin:
@@ -862,65 +857,6 @@ class TracedCableSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class CablePathSerializer(serializers.ModelSerializer):
-    origin_type = ContentTypeField(read_only=True)
-    origin = serializers.SerializerMethodField(read_only=True)
-    destination_type = ContentTypeField(read_only=True)
-    destination = serializers.SerializerMethodField(read_only=True)
-    path = serializers.SerializerMethodField(read_only=True)
-
-    class Meta:
-        model = CablePath
-        fields = "__all__"
-
-    @extend_schema_field(
-        PolymorphicProxySerializer(
-            component_name="PathEndpoint",
-            resource_type_field_name="object_type",
-            serializers=lambda: nested_serializers_for_models(get_all_concrete_models(PathEndpoint)),
-        )
-    )
-    def get_origin(self, obj):
-        """
-        Return the appropriate serializer for the origin.
-        """
-        depth = get_nested_serializer_depth(self)
-        return return_nested_serializer_data_based_on_depth(self, depth, obj, obj.origin, "origin")
-
-    @extend_schema_field(
-        PolymorphicProxySerializer(
-            component_name="PathEndpoint",
-            resource_type_field_name="object_type",
-            serializers=lambda: nested_serializers_for_models(get_all_concrete_models(PathEndpoint)),
-            allow_null=True,
-        )
-    )
-    def get_destination(self, obj):
-        """
-        Return the appropriate serializer for the destination, if any.
-        """
-        if obj.destination_id is not None:
-            depth = get_nested_serializer_depth(self)
-            return return_nested_serializer_data_based_on_depth(self, depth, obj, obj.destination, "destination")
-        return None
-
-    @extend_schema_field(
-        PolymorphicProxySerializer(
-            component_name="CableTermination",
-            resource_type_field_name="object_type",
-            serializers=lambda: nested_serializers_for_models(get_all_concrete_models(CableTermination)),
-            many=True,
-        )
-    )
-    def get_path(self, obj):
-        ret = []
-        for node in obj.get_path():
-            serializer = get_serializer_for_model(node)
-            context = {"request": self.context["request"]}
-            ret.append(serializer(node, context=context).data)
-        return ret
-
-
 #
 # Interface connections
 #
@@ -942,9 +878,8 @@ class InterfaceConnectionSerializer(ValidatedModelSerializer):
 
     @extend_schema_field(serializers.BooleanField(allow_null=True))
     def get_connected_endpoint_reachable(self, obj):
-        if obj._path is not None:
-            return obj._path.is_active
-        return None
+        # An endpoint is reachable if connected_endpoint returns a value
+        return obj.connected_endpoint is not None
 
 
 #

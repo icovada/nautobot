@@ -10,7 +10,6 @@ from nautobot.core.signals import disable_for_loaddata
 
 from .models import (
     Cable,
-    CablePath,
     ControllerManagedDeviceGroup,
     Device,
     DeviceRedundancyGroup,
@@ -24,36 +23,6 @@ from .models import (
     VirtualChassis,
 )
 from .utils import validate_interface_tagged_vlans
-
-
-def create_cablepath(node, rebuild=True):
-    """
-    Create CablePaths for all paths originating from the specified node.
-
-    rebuild (bool) - Used to refresh paths where this node is not an endpoint.
-    """
-    cp = CablePath.from_origin(node)
-    if cp:
-        try:
-            cp.save()
-        except Exception as e:
-            print(node, node.pk)
-            raise e
-    if rebuild:
-        rebuild_paths(node)
-
-
-def rebuild_paths(obj):
-    """
-    Rebuild all CablePaths which traverse the specified node
-    """
-    cable_paths = CablePath.objects.filter(path__contains=obj)
-
-    with transaction.atomic():
-        for cp in cable_paths:
-            cp.delete()
-            # Prevent looping back to rebuild_paths during the atomic transaction.
-            create_cablepath(cp.origin, rebuild=False)
 
 
 #

@@ -1,6 +1,6 @@
 # Generated manually for CircuitTermination CableTermination data population
 
-from django.db import migrations
+from django.db import migrations, models
 
 
 def populate_circuittermination_cabletermination(apps, schema_editor):
@@ -53,10 +53,17 @@ def reverse_populate(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("circuits", "0022_circuittermination_cloud_network"),
-        ("dcim", "0082_add_cabletermination_table"),
+        ("dcim", "0090_alter_path_fields_before_cablepath_removal"),
         ("contenttypes", "0002_remove_content_type_name"),
     ]
 
     operations = [
+        # First alter the _path field to remove FK constraint to CablePath
+        migrations.AlterField(
+            model_name="circuittermination",
+            name="_path",
+            field=models.UUIDField(null=True, blank=True),
+        ),
+        # Then run the data migration
         migrations.RunPython(populate_circuittermination_cabletermination, reverse_populate),
     ]

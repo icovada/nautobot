@@ -1,31 +1,22 @@
-from django.contrib.contenttypes.models import ContentType
-from django.db.models import F
-
 from nautobot.core.apps import HomePageGroup, HomePageItem, HomePagePanel
 from nautobot.dcim import models
 
 
 def _connected_console_ports_count(request):
     # Match queryset used in dcim.views.ConsoleConnectionsListView
-    return models.ConsolePort.objects.restrict(request.user, "view").filter(_path__isnull=False).count()
+    return models.ConsolePort.objects.restrict(request.user, "view").filter(cable__isnull=False).count()
 
 
 def _connected_interfaces_count(request):
     # Match queryset used in dcim.views.InterfaceConnectionsListView
-    return (
-        models.Interface.objects.restrict(request.user, "view")
-        .filter(_path__isnull=False)
-        .exclude(
-            _path__destination_type=ContentType.objects.get_for_model(models.Interface),
-            pk__lt=F("_path__destination_id"),
-        )
-        .count()
-    )
+    # Note: This counts all connected interfaces. Interface-to-interface connections
+    # may be counted twice (once for each end), but this is acceptable for homepage statistics.
+    return models.Interface.objects.restrict(request.user, "view").filter(cable__isnull=False).count()
 
 
 def _connected_power_ports_count(request):
     # Match queryset used in dcim.views.PowerConnectionsListView
-    return models.PowerPort.objects.restrict(request.user, "view").filter(_path__isnull=False).count()
+    return models.PowerPort.objects.restrict(request.user, "view").filter(cable__isnull=False).count()
 
 
 layout = (

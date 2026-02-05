@@ -1,4 +1,4 @@
-from .cables import Cable, CableEnd, CablePath
+from .cables import Cable, CableEnd
 from .device_component_templates import (
     ConsolePortTemplate,
     ConsoleServerPortTemplate,
@@ -55,7 +55,6 @@ __all__ = (
     "BaseInterface",
     "Cable",
     "CableEnd",
-    "CablePath",
     "CableTermination",
     "ConsolePort",
     "ConsolePortTemplate",

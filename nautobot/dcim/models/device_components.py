@@ -280,6 +280,205 @@ class CableTermination(PolymorphicModel, PrimaryModel):
     def get_cable_peer(self):
         return self._cable_peer
 
+    def trace_to_remote(self):
+        """
+        Trace the cable path from this CableTermination through any intermediate
+        FrontPort/RearPort passthroughs to find the remote endpoint.
+
+        Uses a recursive CTE for efficient database-level recursion.
+        CableEnds are paired by (cable, position, opposite side).
+
+        Returns:
+            CableTermination or None: The endpoint at the remote end of the cable path.
+        """
+        from django.db import connection
+
+        ce_table = "dcim_cableend"  # CableEnd table
+        fp_table = "dcim_frontport"  # FrontPort table
+
+        sql = f"""
+        WITH RECURSIVE cable_trace AS (
+            -- Base case: cross the first cable from this endpoint
+            SELECT
+                paired_ce.cable_termination_id AS current_id,
+                1 AS depth,
+                CAST(%(start_id)s AS TEXT) || ',' || CAST(paired_ce.cable_termination_id AS TEXT) AS visited
+            FROM {ce_table} AS start_ce
+            INNER JOIN {ce_table} AS paired_ce
+                ON paired_ce.cable_id = start_ce.cable_id
+                AND paired_ce.position = start_ce.position
+                AND paired_ce.cable_side != start_ce.cable_side
+            WHERE start_ce.cable_termination_id = %(start_id)s
+
+            UNION ALL
+
+            -- Recursive: passthrough (FrontPort<->RearPort) then cross next cable
+            SELECT
+                next_paired.cable_termination_id,
+                ct.depth + 1,
+                ct.visited || ',' || CAST(next_paired.cable_termination_id AS TEXT)
+            FROM cable_trace AS ct
+            -- FrontPort -> RearPort passthrough
+            LEFT JOIN {fp_table} AS fp
+                ON fp.cabletermination_ptr_id = ct.current_id
+            -- RearPort -> FrontPort passthrough (reverse lookup)
+            LEFT JOIN {fp_table} AS fp_rev
+                ON fp_rev.rear_port_id = ct.current_id
+            -- Find cable end on the passthrough destination
+            INNER JOIN {ce_table} AS next_ce
+                ON next_ce.cable_termination_id = COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id)
+            -- Get paired cable end across that cable
+            INNER JOIN {ce_table} AS next_paired
+                ON next_paired.cable_id = next_ce.cable_id
+                AND next_paired.position = next_ce.position
+                AND next_paired.cable_side != next_ce.cable_side
+            -- Cycle detection
+            WHERE ct.visited NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS TEXT) || ',%%'
+                AND ct.visited NOT LIKE CAST(next_paired.cable_termination_id AS TEXT) || ',%%'
+                AND ct.visited NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS TEXT)
+        )
+        SELECT current_id FROM cable_trace
+        ORDER BY depth DESC
+        LIMIT 1
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, {"start_id": str(self.pk)})
+            row = cursor.fetchone()
+
+        if row:
+            node_id = row[0]
+            # Polymorphic query returns the actual subclass instance
+            try:
+                return CableTermination.objects.get(pk=node_id)
+            except CableTermination.DoesNotExist:
+                return None
+        return None
+
+    def trace_path(self):
+        """
+        Trace the full cable path from this CableTermination, returning all intermediate
+        objects in order including CableEnds.
+
+        Uses a recursive CTE for efficient database-level recursion.
+        CableEnds are paired by (cable, position, opposite side).
+
+        Returns:
+            list: Ordered list of objects [CableTermination, CableEnd, Cable,
+                  CableEnd, CableTermination, CableTermination, CableEnd, Cable,
+                  CableEnd, CableTermination] or empty list if no path exists.
+        """
+        from django.db import connection
+
+        from nautobot.dcim.models.cables import Cable, CableEnd
+
+        ce_table = "dcim_cableend"
+        fp_table = "dcim_frontport"
+
+        # CTE now also tracks cable end IDs (pairs: from_ce, to_ce) and cable IDs
+        sql = f"""
+        WITH RECURSIVE cable_trace AS (
+            -- Base case: cross the first cable from this endpoint
+            SELECT
+                paired_ce.cable_termination_id AS current_id,
+                start_ce.cable_id AS cable_id,
+                1 AS depth,
+                CAST(%(start_id)s AS TEXT) AS nodes,
+                CAST(start_ce.cable_id AS TEXT) AS cables,
+                CAST(start_ce.id AS TEXT) || ',' || CAST(paired_ce.id AS TEXT) AS cable_ends
+            FROM {ce_table} AS start_ce
+            INNER JOIN {ce_table} AS paired_ce
+                ON paired_ce.cable_id = start_ce.cable_id
+                AND paired_ce.position = start_ce.position
+                AND paired_ce.cable_side != start_ce.cable_side
+            WHERE start_ce.cable_termination_id = %(start_id)s
+
+            UNION ALL
+
+            -- Recursive: passthrough (FrontPort<->RearPort) then cross next cable
+            SELECT
+                next_paired.cable_termination_id,
+                next_ce.cable_id,
+                ct.depth + 1,
+                ct.nodes || ',' || CAST(ct.current_id AS TEXT)
+                    || ',' || CAST(COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id) AS TEXT),
+                ct.cables || ',' || CAST(next_ce.cable_id AS TEXT),
+                ct.cable_ends || ',' || CAST(next_ce.id AS TEXT) || ',' || CAST(next_paired.id AS TEXT)
+            FROM cable_trace AS ct
+            -- FrontPort -> RearPort passthrough
+            LEFT JOIN {fp_table} AS fp
+                ON fp.cabletermination_ptr_id = ct.current_id
+            -- RearPort -> FrontPort passthrough (reverse lookup)
+            LEFT JOIN {fp_table} AS fp_rev
+                ON fp_rev.rear_port_id = ct.current_id
+            -- Find cable end on the passthrough destination
+            INNER JOIN {ce_table} AS next_ce
+                ON next_ce.cable_termination_id = COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id)
+            -- Get paired cable end across that cable
+            INNER JOIN {ce_table} AS next_paired
+                ON next_paired.cable_id = next_ce.cable_id
+                AND next_paired.position = next_ce.position
+                AND next_paired.cable_side != next_ce.cable_side
+            -- Cycle detection on final destination
+            WHERE (',' || ct.nodes || ',') NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS TEXT) || ',%%'
+        )
+        SELECT nodes || ',' || CAST(current_id AS TEXT) AS full_path, cables, cable_ends
+        FROM cable_trace
+        ORDER BY depth DESC
+        LIMIT 1
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, {"start_id": str(self.pk)})
+            row = cursor.fetchone()
+
+        if not row:
+            return []
+
+        node_ids = [uuid.UUID(x) for x in row[0].split(",")]
+        cable_ids = [uuid.UUID(x) for x in row[1].split(",")]
+        cable_end_ids = [uuid.UUID(x) for x in row[2].split(",")]
+
+        # Fetch all objects in bulk
+        nodes_by_id = {
+            obj.pk: obj
+            for obj in CableTermination.objects.filter(pk__in=node_ids)
+        }
+        cables_by_id = {obj.pk: obj for obj in Cable.objects.filter(pk__in=cable_ids)}
+        cable_ends_by_id = {
+            obj.pk: obj
+            for obj in CableEnd.objects.select_related("cable").filter(pk__in=cable_end_ids)
+        }
+
+        # Build ordered path: node, CableEnd, cable, CableEnd, node, node, CableEnd, cable, CableEnd, node
+        # CableEnds come in pairs (from_ce, to_ce) for each cable crossing
+        result = []
+        ce_idx = 0
+        for i, node_id in enumerate(node_ids):
+            result.append(nodes_by_id[node_id])
+
+            # Check if there's a cable crossing after this node
+            if ce_idx < len(cable_end_ids):
+                curr_node = nodes_by_id.get(node_id)
+                next_node = nodes_by_id.get(node_ids[i + 1]) if i + 1 < len(node_ids) else None
+
+                # Check if nodes are on different devices (indicating cable crossing)
+                curr_device = getattr(curr_node, "device_id", None) if hasattr(curr_node, "device_id") else None
+                next_device = getattr(next_node, "device_id", None) if hasattr(next_node, "device_id") else None
+
+                # Cable crossing happens when devices differ or one is a CircuitTermination
+                if curr_node and next_node and (curr_device != next_device or curr_device is None or next_device is None):
+                    from_ce_id = cable_end_ids[ce_idx]
+                    to_ce_id = cable_end_ids[ce_idx + 1]
+                    cable_id = cable_ids[ce_idx // 2]
+
+                    result.append(cable_ends_by_id[from_ce_id])
+                    result.append(cables_by_id[cable_id])
+                    result.append(cable_ends_by_id[to_ce_id])
+                    ce_idx += 2
+
+        return result
+
     @property
     def parent(self):
         """
@@ -292,50 +491,46 @@ class CableTermination(PolymorphicModel, PrimaryModel):
 
 class PathEndpoint(models.Model):
     """
-    An abstract model inherited by any CableTermination subclass which represents the end of a CablePath; specifically,
+    An abstract model inherited by any CableTermination subclass which represents the end of a cable path; specifically,
     these include ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet, Interface, PowerFeed, and CircuitTermination.
 
-    `_path` references the CablePath originating from this instance, if any. It is set or cleared by the receivers in
-    dcim.signals in response to changes in the cable path, and complements the `origin` GenericForeignKey field on the
-    CablePath model. `_path` should not be accessed directly; rather, use the `path` property.
-
-    `connected_endpoint()` is a convenience method for returning the destination of the associated CablePath, if any.
+    `connected_endpoint` is a convenience property for returning the remote end of the cable path, if any.
+    `path` is a convenience property for returning the full traced cable path, if any.
     """
-
-    _path = ForeignKeyWithAutoRelatedName(
-        to="dcim.CablePath",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
 
     class Meta:
         abstract = True
 
     def trace(self):
-        if self._path is None:
+        """
+        Return the cable path as a list of three-tuples (A termination, cable, B termination).
+        Uses on-the-fly tracing via trace_path() method from CableTermination.
+        """
+        path_objects = self.trace_path()
+        if not path_objects:
             return []
 
-        # Construct the complete path
-        path = [self, *self._path.get_path()]  # pylint: disable=no-member
-        while (len(path) + 1) % 3:
-            # Pad to ensure we have complete three-tuples (e.g. for paths that end at a RearPort)
-            path.append(None)
-        path.append(self._path.destination)  # pylint: disable=no-member
-
         # Return the path as a list of three-tuples (A termination, cable, B termination)
-        return list(zip(*[iter(path)] * 3))
+        # Pad to ensure we have complete three-tuples (e.g. for paths that end at a RearPort)
+        while (len(path_objects) + 1) % 3:
+            path_objects.append(None)
+
+        return list(zip(*[iter(path_objects)] * 3))
 
     @property
     def path(self):
-        return self._path
+        """
+        Return the full traced cable path as a list of objects.
+        """
+        return self.trace_path()
 
     @property
     def connected_endpoint(self):
         """
-        Return the attached CablePath's destination (if any)
+        Return the remote end of the cable path (if any).
+        Uses on-the-fly tracing via trace_to_remote() method from CableTermination.
         """
-        return self._path.destination if self._path else None  # pylint: disable=no-member
+        return self.trace_to_remote()
 
 
 #
