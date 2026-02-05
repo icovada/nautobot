@@ -1,5 +1,6 @@
 from decimal import Decimal
 import re
+import uuid
 
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -9,12 +10,16 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Sum
 from django.utils.functional import classproperty
+from polymorphic.managers import PolymorphicManager
+from polymorphic.models import PolymorphicModel
 
 from nautobot.core.constants import CHARFIELD_MAX_LENGTH
 from nautobot.core.models.fields import ForeignKeyWithAutoRelatedName, MACAddressCharField, NaturalOrderingField
 from nautobot.core.models.generics import BaseModel, PrimaryModel
+from nautobot.core.models.managers import BaseManager
 from nautobot.core.models.ordering import naturalize_interface
 from nautobot.core.models.query_functions import CollateAsChar
+from nautobot.core.models.querysets import RestrictedQuerySet
 from nautobot.core.models.tree_queries import TreeModel
 from nautobot.core.utils.cache import construct_cache_key
 from nautobot.core.utils.data import UtilizationData
@@ -217,15 +222,27 @@ class ModularComponentModel(ComponentModel):
             raise ValidationError("Either device or module must be set")
 
 
-class CableTermination(models.Model):
+class PolymorphicBaseManager(PolymorphicManager, BaseManager):
     """
-    An abstract model inherited by all models to which a Cable can terminate (certain device components, PowerFeed, and
+    Custom manager that combines PolymorphicManager with Nautobot's BaseManager.
+    This provides both polymorphic functionality and Nautobot's custom methods like restrict().
+    """
+
+    pass
+
+
+class CableTermination(PolymorphicModel, PrimaryModel):
+    """
+    A concrete polymorphic model inherited by all models to which a Cable can terminate (certain device components, PowerFeed, and
     CircuitTermination instances). The `cable` field indicates the Cable instance which is terminated to this instance.
 
     `_cable_peer` is a GenericForeignKey used to cache the far-end CableTermination on the local instance; this is a
     shortcut to referencing `cable.termination_b`, for example. `_cable_peer` is set or cleared by the receivers in
     dcim.signals when a Cable instance is created or deleted, respectively.
     """
+
+    # Use custom manager that combines PolymorphicManager with BaseManager
+    objects = PolymorphicBaseManager.from_queryset(RestrictedQuerySet)()
 
     cable = models.ForeignKey(
         to="dcim.Cable",
@@ -257,7 +274,8 @@ class CableTermination(models.Model):
     )
 
     class Meta:
-        abstract = True
+        # No longer abstract - this is now a concrete table
+        pass
 
     def get_cable_peer(self):
         return self._cable_peer
@@ -333,7 +351,7 @@ class PathEndpoint(models.Model):
     "graphql",
     "webhooks",
 )
-class ConsolePort(ModularComponentModel, CableTermination, PathEndpoint):
+class ConsolePort(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical console port within a Device or Module. ConsolePorts connect to ConsoleServerPorts.
     """
@@ -352,7 +370,7 @@ class ConsolePort(ModularComponentModel, CableTermination, PathEndpoint):
 
 
 @extras_features("custom_links", "cable_terminations", "custom_validators", "graphql", "webhooks")
-class ConsoleServerPort(ModularComponentModel, CableTermination, PathEndpoint):
+class ConsoleServerPort(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical port within a Device or Module (typically a designated console server) which provides access to ConsolePorts.
     """
@@ -378,7 +396,7 @@ class ConsoleServerPort(ModularComponentModel, CableTermination, PathEndpoint):
     "graphql",
     "webhooks",
 )
-class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
+class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical power supply (intake) port within a Device or Module. PowerPorts connect to PowerOutlets.
     """
@@ -499,7 +517,7 @@ class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class PowerOutlet(ModularComponentModel, CableTermination, PathEndpoint):
+class PowerOutlet(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical power outlet (output) within a Device or Module which provides power to a PowerPort.
     """
@@ -688,7 +706,7 @@ class BaseInterface(RelationshipModel):
     "statuses",
     "webhooks",
 )
-class Interface(ModularComponentModel, CableTermination, PathEndpoint, BaseInterface):
+class Interface(CableTermination, ModularComponentModel, PathEndpoint, BaseInterface):
     """
     A network interface within a Device or Module. A physical Interface can connect to exactly one other Interface.
     """
@@ -1051,7 +1069,7 @@ class InterfaceRedundancyGroupAssociation(BaseModel, ChangeLoggedModel):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class FrontPort(ModularComponentModel, CableTermination):
+class FrontPort(CableTermination, ModularComponentModel):
     """
     A pass-through port on the front of a Device or Module.
     """
@@ -1095,7 +1113,7 @@ class FrontPort(ModularComponentModel, CableTermination):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class RearPort(ModularComponentModel, CableTermination):
+class RearPort(CableTermination, ModularComponentModel):
     """
     A pass-through port on the rear of a Device or Module.
     """
