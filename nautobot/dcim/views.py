@@ -2839,7 +2839,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_class=tables.DeviceModuleInterfaceTable,
                         table_attribute="vc_interfaces",
                         order_by_fields=["_name"],
-                                                select_related_fields=["cable", "lag"],
+                        select_related_fields=["lag"],
                         related_field_name="device",
                         tab_id="interfaces",
                         enable_bulk_actions=True,
@@ -2866,7 +2866,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Front Ports",
                         table_class=tables.DeviceModuleFrontPortTable,
                         table_attribute="all_front_ports",
-                        select_related_fields=["cable", "rear_port"],
+                        select_related_fields=["rear_port"],
                         related_field_name="device",
                         tab_id="front_ports",
                         enable_bulk_actions=True,
@@ -2892,7 +2892,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Rear Ports",
                         table_class=tables.DeviceModuleRearPortTable,
                         table_attribute="all_rear_ports",
-                        select_related_fields=["cable"],
+                        select_related_fields=[],
                         related_field_name="device",
                         tab_id="rear_ports",
                         enable_bulk_actions=True,
@@ -2916,8 +2916,8 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Console Ports",
                         table_class=tables.DeviceModuleConsolePortTable,
                         table_attribute="all_console_ports",
-                        select_related_fields=["cable"],
-                                                related_field_name="device",
+                        select_related_fields=[],
+                        related_field_name="device",
                         tab_id="console_ports",
                         enable_bulk_actions=True,
                         form_id="console-ports-form",
@@ -2942,8 +2942,8 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Console Server Ports",
                         table_class=tables.DeviceModuleConsoleServerPortTable,
                         table_attribute="all_console_server_ports",
-                        select_related_fields=["cable"],
-                                                related_field_name="device",
+                        select_related_fields=[],
+                        related_field_name="device",
                         tab_id="console_server_ports",
                         enable_bulk_actions=True,
                         form_id="console-server-ports-form",
@@ -2968,8 +2968,8 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Power Ports",
                         table_class=tables.DeviceModulePowerPortTable,
                         table_attribute="all_power_ports",
-                        select_related_fields=["cable"],
-                                                related_field_name="device",
+                        select_related_fields=[],
+                        related_field_name="device",
                         tab_id="power_ports",
                         enable_bulk_actions=True,
                         form_id="power-ports-form",
@@ -2994,8 +2994,8 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Power Outlets",
                         table_class=tables.DeviceModulePowerOutletTable,
                         table_attribute="all_power_outlets",
-                        select_related_fields=["cable", "power_port"],
-                                                related_field_name="device",
+                        select_related_fields=["power_port"],
+                        related_field_name="device",
                         tab_id="power_outlets",
                         enable_bulk_actions=True,
                         form_id="power-outlets-form",
@@ -3553,7 +3553,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         consoleports = (
             instance.console_ports.restrict(request.user, "view")
-            .select_related("cable")
+            .prefetch_related("cable_ends__cable")
         )
         consoleport_table = tables.DeviceModuleConsolePortTable(
             data=consoleports, user=request.user, configurable=True, orderable=False
@@ -3579,7 +3579,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         consoleserverports = (
             instance.console_server_ports.restrict(request.user, "view")
-            .select_related("cable")
+            .prefetch_related("cable_ends__cable")
         )
         consoleserverport_table = tables.DeviceModuleConsoleServerPortTable(
             data=consoleserverports, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3607,7 +3607,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         powerports = (
             instance.power_ports.restrict(request.user, "view")
-            .select_related("cable")
+            .prefetch_related("cable_ends__cable")
         )
         powerport_table = tables.DeviceModulePowerPortTable(
             data=powerports, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3633,7 +3633,8 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         poweroutlets = (
             instance.power_outlets.restrict(request.user, "view")
-            .select_related("cable", "power_port")
+            .select_related("power_port")
+            .prefetch_related("cable_ends__cable")
         )
         poweroutlet_table = tables.DeviceModulePowerOutletTable(
             data=poweroutlets, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3662,8 +3663,9 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
                 Prefetch("ip_addresses", queryset=IPAddress.objects.restrict(request.user)),
                 Prefetch("member_interfaces", queryset=Interface.objects.restrict(request.user)),
                 "tags",
+                "cable_ends__cable",
             )
-            .select_related("lag", "cable")
+            .select_related("lag")
         )
         interface_table = tables.DeviceModuleInterfaceTable(
             data=interfaces, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3687,7 +3689,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
     )
     def frontports(self, request, *args, **kwargs):
         instance = self.get_object()
-        frontports = instance.front_ports.restrict(request.user, "view").select_related("cable", "rear_port")
+        frontports = instance.front_ports.restrict(request.user, "view").select_related("rear_port").prefetch_related("cable_ends__cable")
         frontport_table = tables.DeviceModuleFrontPortTable(
             data=frontports, user=request.user, orderable=False, configurable=True, parent_module=instance
         )
@@ -3710,7 +3712,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
     )
     def rearports(self, request, *args, **kwargs):
         instance = self.get_object()
-        rearports = instance.rear_ports.restrict(request.user, "view").select_related("cable")
+        rearports = instance.rear_ports.restrict(request.user, "view").prefetch_related("cable_ends__cable")
         rearport_table = tables.DeviceModuleRearPortTable(
             data=rearports, user=request.user, orderable=False, configurable=True, parent_module=instance
         )
