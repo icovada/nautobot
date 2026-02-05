@@ -33,6 +33,7 @@ from .devices import Device
 
 __all__ = (
     "Cable",
+    "CableEnd",
     "CablePath",
 )
 
@@ -282,6 +283,45 @@ class Cable(PrimaryModel):
         if self.termination_a is None:
             return None
         return COMPATIBLE_TERMINATION_TYPES[self.termination_a._meta.model_name]
+
+
+@extras_features("graphql")
+class CableEnd(BaseModel):
+    """
+    A single termination point on a cable. Cables can have multiple terminations on each side (A and B).
+
+    This model enables multi-cable terminations while maintaining backwards compatibility with the
+    legacy Cable.termination_a/b fields.
+    """
+
+    class CableSide(models.TextChoices):
+        A = "a", "A"
+        B = "b", "B"
+
+    cable = models.ForeignKey(
+        to="Cable",
+        on_delete=models.CASCADE,
+        related_name="cable_ends",
+    )
+    cable_termination = models.ForeignKey(
+        to="CableTermination",
+        on_delete=models.CASCADE,
+        related_name="cable_ends",
+    )
+    cable_side = models.CharField(max_length=1, choices=CableSide.choices)
+    position = models.PositiveIntegerField(default=0)
+
+    natural_key_field_names = ["pk"]
+
+    class Meta:
+        ordering = ["cable", "cable_side", "position"]
+        unique_together = [
+            ("cable", "position", "cable_side"),
+            ("cable_termination",),  # Each termination can only be connected once
+        ]
+
+    def __str__(self):
+        return f"{self.cable} - side {self.cable_side} - position {self.position}"
 
 
 @extras_features("graphql")
