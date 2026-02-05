@@ -526,16 +526,39 @@ class PathEndpoint(models.Model):
         Return the cable path as a list of three-tuples (A termination, cable, B termination).
         Uses on-the-fly tracing via trace_path() method from CableTermination.
         """
+        from nautobot.dcim.models.cables import Cable, CableEnd
+
         path_objects = self.trace_path()
         if not path_objects:
             return []
 
-        # Return the path as a list of three-tuples (A termination, cable, B termination)
-        # Pad to ensure we have complete three-tuples (e.g. for paths that end at a RearPort)
-        while (len(path_objects) + 1) % 3:
-            path_objects.append(None)
+        # Filter out CableEnd objects to get just [node, cable, node, ...]
+        # CableEnd objects are junction records, not part of the rendered path
+        filtered = [obj for obj in path_objects if not isinstance(obj, CableEnd)]
 
-        return list(zip(*[iter(path_objects)] * 3))
+        if not filtered:
+            return []
+
+        # Group into three-tuples (near_end, cable, far_end)
+        # Handle both cable crossings (node-cable-node) and passthroughs (node-node)
+        result = []
+        i = 0
+        while i < len(filtered):
+            near_end = filtered[i]
+
+            # Check if next item is a Cable
+            if i + 1 < len(filtered) and isinstance(filtered[i + 1], Cable):
+                cable = filtered[i + 1]
+                far_end = filtered[i + 2] if i + 2 < len(filtered) else None
+                result.append((near_end, cable, far_end))
+                i += 3  # Skip cable and move past far_end
+            else:
+                # Passthrough (two consecutive nodes with no cable, e.g., FrontPort -> RearPort)
+                far_end = filtered[i + 1] if i + 1 < len(filtered) else None
+                result.append((near_end, None, far_end))
+                i += 2  # Move past far_end
+
+        return result
 
     @property
     def path(self):

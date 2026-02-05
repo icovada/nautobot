@@ -4859,26 +4859,42 @@ class PathTraceView(generic.ObjectView):
         return super().dispatch(request, *args, **kwargs)
 
     def get_extra_context(self, request, instance):
-        # CablePath has been removed - compute path on-the-fly using trace_path()
-        path_objects = []
+        # CablePath has been removed - compute path on-the-fly using trace()
+        traced_path = []
         total_length = None
 
-        # If this is a CableTermination (PathEndpoint), trace from it
-        if hasattr(instance, "trace_path"):
+        # If this is a PathEndpoint, trace from it
+        if hasattr(instance, "trace"):
             try:
-                path_objects = instance.trace_path()
+                # trace() returns list of three-tuples: (near_end, cable, far_end)
+                traced_path = instance.trace()
                 # Calculate total cable length
-                cables = [obj for obj in path_objects if isinstance(obj, Cable)]
+                cables = [cable for near_end, cable, far_end in traced_path if cable]
                 if cables:
                     from django.db.models import Sum
                     total_length = Cable.objects.filter(
                         pk__in=[c.pk for c in cables]
                     ).aggregate(total=Sum("_abs_length"))["total"]
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error tracing cable path for {instance}: {e}", exc_info=True)
+
+        # Create a mock path object that the template expects
+        class TracePath:
+            def __init__(self, origin, traced_path):
+                self.origin = origin
+                self._traced_path = traced_path
+                self.is_split = False  # No longer tracking split paths
+                self.pk = None
+
+            def trace(self):
+                return self._traced_path
+
+        path_obj = TracePath(instance, traced_path)
 
         return {
-            "path": path_objects,  # List of objects in the path
+            "path": path_obj,  # Mock CablePath object for template compatibility
             "related_paths": [],  # No longer tracking related paths
             "total_length": total_length,
             "view_titles": self.get_view_titles(),
