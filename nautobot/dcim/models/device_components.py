@@ -251,34 +251,60 @@ class CableTermination(PolymorphicModel, PrimaryModel):
     def cable(self):
         """
         Return the Cable connected to this termination via CableEnd.
+
+        This property efficiently uses prefetched data when available (via prefetch_related("cable_ends__cable"))
+        to avoid N+1 query problems.
         """
-        cable_end = self.cable_ends.first()
-        return cable_end.cable if cable_end else None
+        # Iterate to use prefetched data - Django recognizes this pattern
+        for cable_end in self.cable_ends.all():
+            return cable_end.cable
+        return None
+
+    @property
+    def cable_peer(self):
+        """
+        Return the cable peer termination (convenience property for table rendering).
+        Delegates to get_cable_peer().
+        """
+        return self.get_cable_peer()
 
     def get_cable_peer(self):
         """
         Return the termination on the opposite end of the cable.
         Uses on-the-fly tracing to find the immediate peer (same cable, opposite side).
+
+        This method efficiently uses prefetched data when available to avoid N+1 queries.
+        When cable data is prefetched properly, Django automatically uses the cached data.
         """
         cable = self.cable
         if not cable:
             return None
 
-        # Get our CableEnd to determine which side we're on
-        our_cable_end = self.cable_ends.first()
+        # Get our CableEnd - iterate to use prefetched data
+        our_cable_end = None
+        for ce in self.cable_ends.all():
+            our_cable_end = ce
+            break
+
         if not our_cable_end:
             return None
 
-        # Find the peer CableEnd on the same cable, same position, opposite side
-        from nautobot.dcim.models.cables import CableEnd
-        peer_cable_end = CableEnd.objects.filter(
-            cable=cable,
-            position=our_cable_end.position,
-        ).exclude(
-            cable_side=our_cable_end.cable_side
-        ).first()
+        # Find the peer CableEnd - Django will use prefetched cable.cable_ends if available
+        for cable_end in cable.cable_ends.all():
+            if (cable_end.position == our_cable_end.position and
+                cable_end.cable_side != our_cable_end.cable_side):
+                peer_termination = cable_end.cable_termination
 
-        return peer_cable_end.cable_termination if peer_cable_end else None
+                # Ensure we return the polymorphic subclass, not the base CableTermination
+                if peer_termination and type(peer_termination) is CableTermination:
+                    if hasattr(peer_termination, 'polymorphic_ctype'):
+                        model_class = peer_termination.polymorphic_ctype.model_class()
+                        if model_class and model_class != CableTermination:
+                            peer_termination = model_class.objects.get(pk=peer_termination.pk)
+
+                return peer_termination
+
+        return None
 
     def trace_to_remote(self):
         """

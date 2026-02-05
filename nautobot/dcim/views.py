@@ -104,6 +104,7 @@ from .choices import DeviceFaceChoices
 from .constants import NONCONNECTABLE_IFACE_TYPES
 from .models import (
     Cable,
+    CableEnd,
     ConsolePort,
     ConsolePortTemplate,
     ConsoleServerPort,
@@ -2839,7 +2840,19 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_class=tables.DeviceModuleInterfaceTable,
                         table_attribute="vc_interfaces",
                         order_by_fields=["_name"],
-                        select_related_fields=["lag"],
+                        select_related_fields=[
+                            "lag", "status", "role", "vrf", "untagged_vlan",
+                            # Prefetch cable data and peer cable ends to avoid N+1 queries
+                        ],
+                        prefetch_related_fields=[
+                            "tags",
+                            Prefetch(
+                                "cable_ends",
+                                queryset=CableEnd.objects.select_related("cable").prefetch_related(
+                                    "cable__cable_ends__cable_termination",  # Prefetch polymorphic terminations
+                                ),
+                            ),
+                        ],
                         related_field_name="device",
                         tab_id="interfaces",
                         enable_bulk_actions=True,
@@ -3657,13 +3670,21 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
     )
     def interfaces(self, request, *args, **kwargs):
         instance = self.get_object()
+        from nautobot.dcim.models.cables import CableEnd
+
         interfaces = (
             instance.interfaces.restrict(request.user, "view")
             .prefetch_related(
                 Prefetch("ip_addresses", queryset=IPAddress.objects.restrict(request.user)),
                 Prefetch("member_interfaces", queryset=Interface.objects.restrict(request.user)),
                 "tags",
-                "cable_ends__cable",
+                # Prefetch cable data and peer cable ends to avoid N+1 queries
+                Prefetch(
+                    "cable_ends",
+                    queryset=CableEnd.objects.select_related("cable").prefetch_related(
+                        "cable__cable_ends__cable_termination",  # Prefetch polymorphic terminations
+                    ),
+                ),
             )
             .select_related("lag")
         )
