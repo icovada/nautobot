@@ -16,7 +16,6 @@ from .models import (
     Interface,
     InterfaceVDCAssignment,
     LocationType,
-    PathEndpoint,
     PowerPanel,
     Rack,
     RackGroup,
@@ -176,7 +175,8 @@ def clear_virtualchassis_members(instance, **kwargs):
 @receiver(post_save, sender=Cable)
 def update_connected_endpoints(instance, created, raw=False, **kwargs):
     """
-    When a Cable is saved, check for and update its two connected endpoints
+    When a Cable is saved, update its two connected endpoints.
+    Cable paths are now traced on-the-fly, so no CablePath updates needed.
     """
     logger = logging.getLogger(__name__ + ".cable")
     if raw:
@@ -195,27 +195,12 @@ def update_connected_endpoints(instance, created, raw=False, **kwargs):
         instance.termination_b._cable_peer = instance.termination_a
         instance.termination_b.save()
 
-    # Create/update cable paths
-    if created:
-        for termination in (instance.termination_a, instance.termination_b):
-            if isinstance(termination, PathEndpoint):
-                create_cablepath(termination)
-            else:
-                rebuild_paths(termination)
-    elif instance.status != instance._orig_status:
-        # We currently don't support modifying either termination of an existing Cable. (This
-        # may change in the future.) However, we do need to capture status changes and update
-        # any CablePaths accordingly.
-        if instance.status != Cable.STATUS_CONNECTED:
-            CablePath.objects.filter(path__contains=instance).update(is_active=False)
-        else:
-            rebuild_paths(instance)
-
 
 @receiver(pre_delete, sender=Cable)
 def nullify_connected_endpoints(instance, **kwargs):
     """
-    When a Cable is deleted, check for and update its two connected endpoints
+    When a Cable is deleted, update its two connected endpoints.
+    Cable paths are now traced on-the-fly, so no CablePath cleanup needed.
     """
     logger = logging.getLogger(__name__ + ".cable")
 
@@ -230,20 +215,6 @@ def nullify_connected_endpoints(instance, **kwargs):
         instance.termination_b.cable = None
         instance.termination_b._cable_peer = None
         instance.termination_b.save()
-
-    # Delete and retrace any dependent cable paths
-    for cablepath in CablePath.objects.filter(path__contains=instance):
-        cp = CablePath.from_origin(cablepath.origin)
-        if cp:
-            CablePath.objects.filter(pk=cablepath.pk).update(
-                path=cp.path,
-                destination_type=ContentType.objects.get_for_model(cp.destination) if cp.destination else None,
-                destination_id=cp.destination.pk if cp.destination else None,
-                is_active=cp.is_active,
-                is_split=cp.is_split,
-            )
-        else:
-            cablepath.delete()
 
 
 #
