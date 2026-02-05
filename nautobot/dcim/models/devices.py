@@ -1044,7 +1044,7 @@ class Device(PrimaryModel, ConfigContextModel):
             FrontPort,
             RearPort,
         ]:
-            cable_pks += component_model.objects.filter(device=self, cable__isnull=False).values_list(
+            cable_pks += component_model.objects.filter(device=self, cable_ends__isnull=False).values_list(
                 "cable", flat=True
             )
         if pk_list:
@@ -2120,7 +2120,7 @@ class Module(PrimaryModel):
             FrontPort,
             RearPort,
         ]:
-            cable_pks += component_model.objects.filter(module=self, cable__isnull=False).values_list(
+            cable_pks += component_model.objects.filter(module=self, cable_ends__isnull=False).values_list(
                 "cable", flat=True
             )
         if pk_list:

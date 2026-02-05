@@ -673,23 +673,19 @@ class ModuleBayViewSet(NautobotModelViewSet):
 
 
 class ConsoleConnectionViewSet(ListModelMixin, GenericViewSet):
-    # CablePath removed - filter by cable existence instead
-    queryset = ConsolePort.objects.select_related("device").filter(cable__isnull=False)
+    queryset = ConsolePort.objects.select_related("device").filter(cable_ends__isnull=False)
     serializer_class = serializers.ConsolePortSerializer
     filterset_class = filters.ConsoleConnectionFilterSet
 
 
 class PowerConnectionViewSet(ListModelMixin, GenericViewSet):
-    # CablePath removed - filter by cable existence instead
-    queryset = PowerPort.objects.select_related("device").filter(cable__isnull=False)
+    queryset = PowerPort.objects.select_related("device").filter(cable_ends__isnull=False)
     serializer_class = serializers.PowerPortSerializer
     filterset_class = filters.PowerConnectionFilterSet
 
 
 class InterfaceConnectionViewSet(ListModelMixin, GenericViewSet):
-    # CablePath removed - filter by cable existence
-    # Note: duplicate connections are no longer automatically avoided
-    queryset = Interface.objects.select_related("device").filter(cable__isnull=False)
+    queryset = Interface.objects.select_related("device").filter(cable_ends__isnull=False)
     serializer_class = serializers.InterfaceConnectionSerializer
     filterset_class = filters.InterfaceConnectionFilterSet
 

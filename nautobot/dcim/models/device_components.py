@@ -2,7 +2,6 @@ from decimal import Decimal
 import re
 import uuid
 
-from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -234,51 +233,52 @@ class PolymorphicBaseManager(PolymorphicManager, BaseManager):
 class CableTermination(PolymorphicModel, PrimaryModel):
     """
     A concrete polymorphic model inherited by all models to which a Cable can terminate (certain device components, PowerFeed, and
-    CircuitTermination instances). The `cable` field indicates the Cable instance which is terminated to this instance.
+    CircuitTermination instances).
 
-    `_cable_peer` is a GenericForeignKey used to cache the far-end CableTermination on the local instance; this is a
-    shortcut to referencing `cable.termination_b`, for example. `_cable_peer` is set or cleared by the receivers in
-    dcim.signals when a Cable instance is created or deleted, respectively.
+    Connections are made through the CableEnd junction table, which allows multiple terminations per cable side.
+    The `cable` property returns the Cable connected to this termination via CableEnd.
+    Use `get_cable_peer()` to get the immediate peer on the opposite side of the cable.
     """
 
     # Use custom manager that combines PolymorphicManager with BaseManager
     objects = PolymorphicBaseManager.from_queryset(RestrictedQuerySet)()
 
-    cable = models.ForeignKey(
-        to="dcim.Cable",
-        on_delete=models.SET_NULL,
-        related_name="+",
-        blank=True,
-        null=True,
-    )
-    _cable_peer_type = models.ForeignKey(
-        to=ContentType,
-        on_delete=models.SET_NULL,
-        related_name="+",
-        blank=True,
-        null=True,
-    )
-    _cable_peer_id = models.UUIDField(blank=True, null=True)
-    _cable_peer = GenericForeignKey(ct_field="_cable_peer_type", fk_field="_cable_peer_id")
-
-    # Generic relations to Cable. These ensure that an attached Cable is deleted if the terminated object is deleted.
-    _cabled_as_a = GenericRelation(
-        to="dcim.Cable",
-        content_type_field="termination_a_type",
-        object_id_field="termination_a_id",
-    )
-    _cabled_as_b = GenericRelation(
-        to="dcim.Cable",
-        content_type_field="termination_b_type",
-        object_id_field="termination_b_id",
-    )
-
     class Meta:
         # No longer abstract - this is now a concrete table
         pass
 
+    @property
+    def cable(self):
+        """
+        Return the Cable connected to this termination via CableEnd.
+        """
+        cable_end = self.cable_ends.first()
+        return cable_end.cable if cable_end else None
+
     def get_cable_peer(self):
-        return self._cable_peer
+        """
+        Return the termination on the opposite end of the cable.
+        Uses on-the-fly tracing to find the immediate peer (same cable, opposite side).
+        """
+        cable = self.cable
+        if not cable:
+            return None
+
+        # Get our CableEnd to determine which side we're on
+        our_cable_end = self.cable_ends.first()
+        if not our_cable_end:
+            return None
+
+        # Find the peer CableEnd on the same cable, same position, opposite side
+        from nautobot.dcim.models.cables import CableEnd
+        peer_cable_end = CableEnd.objects.filter(
+            cable=cable,
+            position=our_cable_end.position,
+        ).exclude(
+            cable_side=our_cable_end.cable_side
+        ).first()
+
+        return peer_cable_end.cable_termination if peer_cable_end else None
 
     def trace_to_remote(self):
         """

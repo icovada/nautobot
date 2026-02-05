@@ -175,46 +175,32 @@ def clear_virtualchassis_members(instance, **kwargs):
 @receiver(post_save, sender=Cable)
 def update_connected_endpoints(instance, created, raw=False, **kwargs):
     """
-    When a Cable is saved, update its two connected endpoints.
-    Cable paths are now traced on-the-fly, so no CablePath updates needed.
+    When a Cable is saved, ensure CableEnd objects exist for the terminations.
+    Cable paths are now traced on-the-fly via CableEnd relationships.
     """
     logger = logging.getLogger(__name__ + ".cable")
     if raw:
         logger.debug(f"Skipping endpoint updates for imported cable {instance}")
         return
 
-    # Cache the Cable on its two termination points
-    if instance.termination_a.cable != instance:
-        logger.debug(f"Updating termination A for cable {instance}")
-        instance.termination_a.cable = instance
-        instance.termination_a._cable_peer = instance.termination_b
-        instance.termination_a.save()
-    if instance.termination_b.cable != instance:
-        logger.debug(f"Updating termination B for cable {instance}")
-        instance.termination_b.cable = instance
-        instance.termination_b._cable_peer = instance.termination_a
-        instance.termination_b.save()
+    # Create CableEnd objects if they don't exist
+    # This maintains backwards compatibility with Cable.termination_a/b
+    from nautobot.dcim.models.cables import CableEnd
 
-
-@receiver(pre_delete, sender=Cable)
-def nullify_connected_endpoints(instance, **kwargs):
-    """
-    When a Cable is deleted, update its two connected endpoints.
-    Cable paths are now traced on-the-fly, so no CablePath cleanup needed.
-    """
-    logger = logging.getLogger(__name__ + ".cable")
-
-    # Disassociate the Cable from its termination points
-    if instance.termination_a is not None:
-        logger.debug(f"Nullifying termination A for cable {instance}")
-        instance.termination_a.cable = None
-        instance.termination_a._cable_peer = None
-        instance.termination_a.save()
-    if instance.termination_b is not None:
-        logger.debug(f"Nullifying termination B for cable {instance}")
-        instance.termination_b.cable = None
-        instance.termination_b._cable_peer = None
-        instance.termination_b.save()
+    if instance.termination_a:
+        CableEnd.objects.get_or_create(
+            cable=instance,
+            cable_termination=instance.termination_a,
+            cable_side=CableEnd.CableSide.A,
+            defaults={"position": 0},
+        )
+    if instance.termination_b:
+        CableEnd.objects.get_or_create(
+            cable=instance,
+            cable_termination=instance.termination_b,
+            cable_side=CableEnd.CableSide.B,
+            defaults={"position": 0},
+        )
 
 
 #

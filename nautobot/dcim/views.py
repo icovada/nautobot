@@ -4976,7 +4976,7 @@ class ConnectionsListView(generic.ObjectListView):
 
 
 class ConsoleConnectionsListView(ConnectionsListView):
-    queryset = ConsolePort.objects.filter(cable__isnull=False)
+    queryset = ConsolePort.objects.filter(cable_ends__isnull=False)
     filterset = filters.ConsoleConnectionFilterSet
     filterset_form = forms.ConsoleConnectionFilterForm
     table = tables.ConsoleConnectionTable
@@ -4986,7 +4986,7 @@ class ConsoleConnectionsListView(ConnectionsListView):
 
 
 class PowerConnectionsListView(ConnectionsListView):
-    queryset = PowerPort.objects.filter(cable__isnull=False)
+    queryset = PowerPort.objects.filter(cable_ends__isnull=False)
     filterset = filters.PowerConnectionFilterSet
     filterset_form = forms.PowerConnectionFilterForm
     table = tables.PowerConnectionTable
@@ -5013,7 +5013,7 @@ class InterfaceConnectionsListView(ConnectionsListView):
         Get all interfaces that have cables connected.
         Note: For interface-to-interface connections, both ends will be shown in the list.
         """
-        qs = Interface.objects.filter(cable__isnull=False)
+        qs = Interface.objects.filter(cable_ends__isnull=False)
         if self.queryset is None:
             self.queryset = qs
 
