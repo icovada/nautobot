@@ -314,6 +314,8 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         Uses a recursive CTE for efficient database-level recursion.
         CableEnds are paired by (cable, position, opposite side).
 
+        Supports both PostgreSQL and MySQL 8.0+.
+
         Returns:
             CableTermination or None: The endpoint at the remote end of the cable path.
         """
@@ -322,13 +324,24 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         ce_table = "dcim_cableend"  # CableEnd table
         fp_table = "dcim_frontport"  # FrontPort table
 
+        # Database-specific SQL syntax
+        is_mysql = connection.vendor == 'mysql'
+        if is_mysql:
+            # MySQL syntax
+            cast_text = "CHAR"
+            concat_op = "CONCAT({0}, ',', {1})"
+        else:
+            # PostgreSQL syntax (default)
+            cast_text = "TEXT"
+            concat_op = "{0} || ',' || {1}"
+
         sql = f"""
         WITH RECURSIVE cable_trace AS (
             -- Base case: cross the first cable from this endpoint
             SELECT
                 paired_ce.cable_termination_id AS current_id,
                 1 AS depth,
-                CAST(%(start_id)s AS TEXT) || ',' || CAST(paired_ce.cable_termination_id AS TEXT) AS visited
+                {concat_op.format(f"CAST(%(start_id)s AS {cast_text})", f"CAST(paired_ce.cable_termination_id AS {cast_text})")} AS visited
             FROM {ce_table} AS start_ce
             INNER JOIN {ce_table} AS paired_ce
                 ON paired_ce.cable_id = start_ce.cable_id
@@ -342,7 +355,7 @@ class CableTermination(PolymorphicModel, PrimaryModel):
             SELECT
                 next_paired.cable_termination_id,
                 ct.depth + 1,
-                ct.visited || ',' || CAST(next_paired.cable_termination_id AS TEXT)
+                {concat_op.format("ct.visited", f"CAST(next_paired.cable_termination_id AS {cast_text})")}
             FROM cable_trace AS ct
             -- FrontPort -> RearPort passthrough
             LEFT JOIN {fp_table} AS fp
@@ -359,9 +372,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                 AND next_paired.position = next_ce.position
                 AND next_paired.cable_side != next_ce.cable_side
             -- Cycle detection
-            WHERE ct.visited NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS TEXT) || ',%%'
-                AND ct.visited NOT LIKE CAST(next_paired.cable_termination_id AS TEXT) || ',%%'
-                AND ct.visited NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS TEXT)
+            WHERE ct.visited NOT LIKE {concat_op.format("'%%,'", f"CAST(next_paired.cable_termination_id AS {cast_text})")} || ',%%'
+                AND ct.visited NOT LIKE CAST(next_paired.cable_termination_id AS {cast_text}) || ',%%'
+                AND ct.visited NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS {cast_text})
         )
         SELECT current_id FROM cable_trace
         ORDER BY depth DESC
@@ -396,6 +409,8 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         Uses a recursive CTE for efficient database-level recursion.
         CableEnds are paired by (cable, position, opposite side).
 
+        Supports both PostgreSQL and MySQL 8.0+.
+
         Returns:
             list: Ordered list of objects [CableTermination, CableEnd, Cable,
                   CableEnd, CableTermination, CableTermination, CableEnd, Cable,
@@ -408,6 +423,19 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         ce_table = "dcim_cableend"
         fp_table = "dcim_frontport"
 
+        # Database-specific SQL syntax
+        is_mysql = connection.vendor == 'mysql'
+        if is_mysql:
+            # MySQL syntax
+            cast_text = "CHAR"
+            concat_op = "CONCAT({0}, ',', {1})"
+            concat_3 = "CONCAT({0}, ',', {1}, ',', {2})"
+        else:
+            # PostgreSQL syntax (default)
+            cast_text = "TEXT"
+            concat_op = "{0} || ',' || {1}"
+            concat_3 = "{0} || ',' || {1} || ',' || {2}"
+
         # CTE now also tracks cable end IDs (pairs: from_ce, to_ce) and cable IDs
         sql = f"""
         WITH RECURSIVE cable_trace AS (
@@ -416,9 +444,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                 paired_ce.cable_termination_id AS current_id,
                 start_ce.cable_id AS cable_id,
                 1 AS depth,
-                CAST(%(start_id)s AS TEXT) AS nodes,
-                CAST(start_ce.cable_id AS TEXT) AS cables,
-                CAST(start_ce.id AS TEXT) || ',' || CAST(paired_ce.id AS TEXT) AS cable_ends
+                CAST(%(start_id)s AS {cast_text}) AS nodes,
+                CAST(start_ce.cable_id AS {cast_text}) AS cables,
+                {concat_op.format(f"CAST(start_ce.id AS {cast_text})", f"CAST(paired_ce.id AS {cast_text})")} AS cable_ends
             FROM {ce_table} AS start_ce
             INNER JOIN {ce_table} AS paired_ce
                 ON paired_ce.cable_id = start_ce.cable_id
@@ -433,10 +461,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                 next_paired.cable_termination_id,
                 next_ce.cable_id,
                 ct.depth + 1,
-                ct.nodes || ',' || CAST(ct.current_id AS TEXT)
-                    || ',' || CAST(COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id) AS TEXT),
-                ct.cables || ',' || CAST(next_ce.cable_id AS TEXT),
-                ct.cable_ends || ',' || CAST(next_ce.id AS TEXT) || ',' || CAST(next_paired.id AS TEXT)
+                {concat_3.format("ct.nodes", f"CAST(ct.current_id AS {cast_text})", f"CAST(COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id) AS {cast_text})")},
+                {concat_op.format("ct.cables", f"CAST(next_ce.cable_id AS {cast_text})")},
+                {concat_3.format("ct.cable_ends", f"CAST(next_ce.id AS {cast_text})", f"CAST(next_paired.id AS {cast_text})")}
             FROM cable_trace AS ct
             -- FrontPort -> RearPort passthrough
             LEFT JOIN {fp_table} AS fp
@@ -453,9 +480,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                 AND next_paired.position = next_ce.position
                 AND next_paired.cable_side != next_ce.cable_side
             -- Cycle detection on final destination
-            WHERE (',' || ct.nodes || ',') NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS TEXT) || ',%%'
+            WHERE {concat_op.format("','", concat_op.format("ct.nodes", "','"))} NOT LIKE {concat_op.format("'%%,'", f"CAST(next_paired.cable_termination_id AS {cast_text})")} || ',%%'
         )
-        SELECT nodes || ',' || CAST(current_id AS TEXT) AS full_path, cables, cable_ends
+        SELECT {concat_op.format("nodes", f"CAST(current_id AS {cast_text})")} AS full_path, cables, cable_ends
         FROM cable_trace
         ORDER BY depth DESC
         LIMIT 1
