@@ -19,6 +19,7 @@ class Migration(migrations.Migration):
         migrations.RemoveField(model_name="circuittermination", name="_custom_field_data"),
         migrations.RemoveField(model_name="circuittermination", name="tags"),
         migrations.RemoveField(model_name="circuittermination", name="id"),
+        migrations.RemoveField(model_name="circuittermination", name="_path"),
         # Now make cabletermination_ptr non-nullable and set as primary key
         migrations.AlterField(
             model_name="circuittermination",

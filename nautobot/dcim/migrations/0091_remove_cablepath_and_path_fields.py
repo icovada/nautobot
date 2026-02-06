@@ -5,6 +5,7 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
     dependencies = [
+        ("circuits", "0026_finalize_circuittermination_structure"),
         ("dcim", "0090_alter_path_fields_before_cablepath_removal"),
     ]
 
