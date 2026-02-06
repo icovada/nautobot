@@ -957,8 +957,19 @@ class Device(PrimaryModel, ConfigContextModel):
             (ModuleBay, self.device_type.module_bay_templates.all()),
         ]
         instantiated_components = []
+        # Models inheriting from CableTermination use multi-table inheritance,
+        # which doesn't support bulk_create.
+        multi_table_models = (
+            ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet,
+            Interface, RearPort, FrontPort,
+        )
         for model, templates in component_models:
-            model.objects.bulk_create([x.instantiate(device=self) for x in templates])
+            instances = [x.instantiate(device=self) for x in templates]
+            if issubclass(model, multi_table_models):
+                for instance in instances:
+                    instance.save()
+            else:
+                model.objects.bulk_create(instances)
         cache_key = construct_cache_key(self, method_name="has_module_bays", branch_aware=True)
         cache.delete(cache_key)
         return instantiated_components
@@ -2072,8 +2083,17 @@ class Module(PrimaryModel):
             (ModuleBay, self.module_type.module_bay_templates.all()),
         ]
         instantiated_components = []
+        multi_table_models = (
+            ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet,
+            Interface, RearPort, FrontPort,
+        )
         for model, templates in component_models:
-            model.objects.bulk_create([x.instantiate(device=None, module=self) for x in templates])
+            instances = [x.instantiate(device=None, module=self) for x in templates]
+            if issubclass(model, multi_table_models):
+                for instance in instances:
+                    instance.save()
+            else:
+                model.objects.bulk_create(instances)
         return instantiated_components
 
     create_components.alters_data = True
