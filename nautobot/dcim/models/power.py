@@ -110,7 +110,7 @@ class PowerPanel(PrimaryModel):
     "statuses",
     "webhooks",
 )
-class PowerFeed(PrimaryModel, PathEndpoint, CableTermination):
+class PowerFeed(CableTermination, PathEndpoint):
     """
     An electrical circuit delivered from a PowerPanel.
     """

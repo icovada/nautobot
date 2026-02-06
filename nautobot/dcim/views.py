@@ -10,7 +10,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger
 from django.db import IntegrityError, transaction
-from django.db.models import F, Prefetch
+from django.db.models import Prefetch
 from django.forms import (
     modelformset_factory,
     ModelMultipleChoiceField,
@@ -104,7 +104,7 @@ from .choices import DeviceFaceChoices
 from .constants import NONCONNECTABLE_IFACE_TYPES
 from .models import (
     Cable,
-    CablePath,
+    CableEnd,
     ConsolePort,
     ConsolePortTemplate,
     ConsoleServerPort,
@@ -2840,8 +2840,19 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_class=tables.DeviceModuleInterfaceTable,
                         table_attribute="vc_interfaces",
                         order_by_fields=["_name"],
-                        prefetch_related_fields=["_path__destination"],
-                        select_related_fields=["cable", "lag"],
+                        select_related_fields=[
+                            "lag", "status", "role", "vrf", "untagged_vlan",
+                            # Prefetch cable data and peer cable ends to avoid N+1 queries
+                        ],
+                        prefetch_related_fields=[
+                            "tags",
+                            Prefetch(
+                                "cable_ends",
+                                queryset=CableEnd.objects.select_related("cable").prefetch_related(
+                                    "cable__cable_ends__cable_termination",  # Prefetch polymorphic terminations
+                                ),
+                            ),
+                        ],
                         related_field_name="device",
                         tab_id="interfaces",
                         enable_bulk_actions=True,
@@ -2868,7 +2879,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Front Ports",
                         table_class=tables.DeviceModuleFrontPortTable,
                         table_attribute="all_front_ports",
-                        select_related_fields=["cable", "rear_port"],
+                        select_related_fields=["rear_port"],
                         related_field_name="device",
                         tab_id="front_ports",
                         enable_bulk_actions=True,
@@ -2894,7 +2905,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Rear Ports",
                         table_class=tables.DeviceModuleRearPortTable,
                         table_attribute="all_rear_ports",
-                        select_related_fields=["cable"],
+                        select_related_fields=[],
                         related_field_name="device",
                         tab_id="rear_ports",
                         enable_bulk_actions=True,
@@ -2918,8 +2929,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Console Ports",
                         table_class=tables.DeviceModuleConsolePortTable,
                         table_attribute="all_console_ports",
-                        select_related_fields=["cable"],
-                        prefetch_related_fields=["_path__destination"],
+                        select_related_fields=[],
                         related_field_name="device",
                         tab_id="console_ports",
                         enable_bulk_actions=True,
@@ -2945,8 +2955,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Console Server Ports",
                         table_class=tables.DeviceModuleConsoleServerPortTable,
                         table_attribute="all_console_server_ports",
-                        select_related_fields=["cable"],
-                        prefetch_related_fields=["_path__destination"],
+                        select_related_fields=[],
                         related_field_name="device",
                         tab_id="console_server_ports",
                         enable_bulk_actions=True,
@@ -2972,8 +2981,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Power Ports",
                         table_class=tables.DeviceModulePowerPortTable,
                         table_attribute="all_power_ports",
-                        select_related_fields=["cable"],
-                        prefetch_related_fields=["_path__destination"],
+                        select_related_fields=[],
                         related_field_name="device",
                         tab_id="power_ports",
                         enable_bulk_actions=True,
@@ -2999,8 +3007,7 @@ class DeviceUIViewSet(NautobotUIViewSet):
                         table_title="Power Outlets",
                         table_class=tables.DeviceModulePowerOutletTable,
                         table_attribute="all_power_outlets",
-                        select_related_fields=["cable", "power_port"],
-                        prefetch_related_fields=["_path__destination"],
+                        select_related_fields=["power_port"],
                         related_field_name="device",
                         tab_id="power_outlets",
                         enable_bulk_actions=True,
@@ -3328,7 +3335,6 @@ class DeviceUIViewSet(NautobotUIViewSet):
         instance = self.get_object()
         interfaces = (
             instance.all_interfaces.restrict(request.user, "view")
-            .prefetch_related("_path__destination")
             .exclude(type__in=NONCONNECTABLE_IFACE_TYPES)
         )
         return Response(
@@ -3560,8 +3566,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         consoleports = (
             instance.console_ports.restrict(request.user, "view")
-            .select_related("cable")
-            .prefetch_related("_path__destination")
+            .prefetch_related("cable_ends__cable")
         )
         consoleport_table = tables.DeviceModuleConsolePortTable(
             data=consoleports, user=request.user, configurable=True, orderable=False
@@ -3587,8 +3592,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         consoleserverports = (
             instance.console_server_ports.restrict(request.user, "view")
-            .select_related("cable")
-            .prefetch_related("_path__destination")
+            .prefetch_related("cable_ends__cable")
         )
         consoleserverport_table = tables.DeviceModuleConsoleServerPortTable(
             data=consoleserverports, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3616,8 +3620,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         powerports = (
             instance.power_ports.restrict(request.user, "view")
-            .select_related("cable")
-            .prefetch_related("_path__destination")
+            .prefetch_related("cable_ends__cable")
         )
         powerport_table = tables.DeviceModulePowerPortTable(
             data=powerports, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3643,8 +3646,8 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
         instance = self.get_object()
         poweroutlets = (
             instance.power_outlets.restrict(request.user, "view")
-            .select_related("cable", "power_port")
-            .prefetch_related("_path__destination")
+            .select_related("power_port")
+            .prefetch_related("cable_ends__cable")
         )
         poweroutlet_table = tables.DeviceModulePowerOutletTable(
             data=poweroutlets, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3667,15 +3670,23 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
     )
     def interfaces(self, request, *args, **kwargs):
         instance = self.get_object()
+        from nautobot.dcim.models.cables import CableEnd
+
         interfaces = (
             instance.interfaces.restrict(request.user, "view")
             .prefetch_related(
                 Prefetch("ip_addresses", queryset=IPAddress.objects.restrict(request.user)),
                 Prefetch("member_interfaces", queryset=Interface.objects.restrict(request.user)),
-                "_path__destination",
                 "tags",
+                # Prefetch cable data and peer cable ends to avoid N+1 queries
+                Prefetch(
+                    "cable_ends",
+                    queryset=CableEnd.objects.select_related("cable").prefetch_related(
+                        "cable__cable_ends__cable_termination",  # Prefetch polymorphic terminations
+                    ),
+                ),
             )
-            .select_related("lag", "cable")
+            .select_related("lag")
         )
         interface_table = tables.DeviceModuleInterfaceTable(
             data=interfaces, user=request.user, orderable=False, configurable=True, parent_module=instance
@@ -3699,7 +3710,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
     )
     def frontports(self, request, *args, **kwargs):
         instance = self.get_object()
-        frontports = instance.front_ports.restrict(request.user, "view").select_related("cable", "rear_port")
+        frontports = instance.front_ports.restrict(request.user, "view").select_related("rear_port").prefetch_related("cable_ends__cable")
         frontport_table = tables.DeviceModuleFrontPortTable(
             data=frontports, user=request.user, orderable=False, configurable=True, parent_module=instance
         )
@@ -3722,7 +3733,7 @@ class ModuleUIViewSet(BulkComponentCreateUIViewSetMixin, NautobotUIViewSet):
     )
     def rearports(self, request, *args, **kwargs):
         instance = self.get_object()
-        rearports = instance.rear_ports.restrict(request.user, "view").select_related("cable")
+        rearports = instance.rear_ports.restrict(request.user, "view").prefetch_related("cable_ends__cable")
         rearport_table = tables.DeviceModuleRearPortTable(
             data=rearports, user=request.user, orderable=False, configurable=True, parent_module=instance
         )
@@ -4843,7 +4854,7 @@ class CableUIViewSet(NautobotUIViewSet):
     form_class = forms.CableForm
     serializer_class = serializers.CableSerializer
     table_class = tables.CableTable
-    queryset = Cable.objects.prefetch_related("termination_a", "termination_b")
+    queryset = Cable.objects.prefetch_related("cable_ends__cable_termination")
     action_buttons = ("import", "export")
 
     def get_queryset(self):
@@ -4871,34 +4882,44 @@ class PathTraceView(generic.ObjectView):
         return super().dispatch(request, *args, **kwargs)
 
     def get_extra_context(self, request, instance):
-        related_paths = []
+        # CablePath has been removed - compute path on-the-fly using trace()
+        traced_path = []
+        total_length = None
 
-        # If tracing a PathEndpoint, locate the CablePath (if one exists) by its origin
-        if isinstance(instance, PathEndpoint):
-            path = instance._path
+        # If this is a PathEndpoint, trace from it
+        if hasattr(instance, "trace"):
+            try:
+                # trace() returns list of three-tuples: (near_end, cable, far_end)
+                traced_path = instance.trace()
+                # Calculate total cable length
+                cables = [cable for near_end, cable, far_end in traced_path if cable]
+                if cables:
+                    from django.db.models import Sum
+                    total_length = Cable.objects.filter(
+                        pk__in=[c.pk for c in cables]
+                    ).aggregate(total=Sum("_abs_length"))["total"]
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error tracing cable path for {instance}: {e}", exc_info=True)
 
-        # Otherwise, find all CablePaths which traverse the specified object
-        else:
-            related_paths = CablePath.objects.filter(path__contains=instance).prefetch_related("origin")
-            # Check for specification of a particular path (when tracing pass-through ports)
+        # Create a mock path object that the template expects
+        class TracePath:
+            def __init__(self, origin, traced_path):
+                self.origin = origin
+                self._traced_path = traced_path
+                self.is_split = False  # No longer tracking split paths
+                self.pk = None
 
-            cablepath_id = request.GET.get("cablepath_id")
-            if cablepath_id is not None:
-                try:
-                    path_id = uuid.UUID(cablepath_id)
-                except (AttributeError, TypeError, ValueError):
-                    path_id = None
-                try:
-                    path = related_paths.get(pk=path_id)
-                except CablePath.DoesNotExist:
-                    path = related_paths.first()
-            else:
-                path = related_paths.first()
+            def trace(self):
+                return self._traced_path
+
+        path_obj = TracePath(instance, traced_path)
 
         return {
-            "path": path,
-            "related_paths": related_paths,
-            "total_length": path.get_total_length() if path else None,
+            "path": path_obj,  # Mock CablePath object for template compatibility
+            "related_paths": [],  # No longer tracking related paths
+            "total_length": total_length,
             "view_titles": self.get_view_titles(),
             **super().get_extra_context(request, instance),
         }
@@ -4930,9 +4951,8 @@ class CableCreateView(generic.ObjectEditView):
         termination_b_type_name = url_kwargs.get("termination_b_type")
         self.termination_b_type = ContentType.objects.get(model=termination_b_type_name.replace("-", ""))
 
-        # Initialize Cable termination attributes
-        obj.termination_a = termination_a_type.objects.get(pk=termination_a_id)
-        obj.termination_b_type = self.termination_b_type
+        # Store termination A info on the view for later use when creating CableEnd records
+        self.termination_a = termination_a_type.objects.get(pk=termination_a_id)
 
         return obj
 
@@ -4946,11 +4966,11 @@ class CableCreateView(generic.ObjectEditView):
         initial_data = {k: request.GET[k] for k in request.GET}
 
         # Set initial location and rack based on side A termination (if not already set)
-        termination_a_location = getattr(obj.termination_a.parent, "location", None)
+        termination_a_location = getattr(self.termination_a.parent, "location", None)
         if "termination_b_location" not in initial_data:
             initial_data["termination_b_location"] = termination_a_location
         if "termination_b_rack" not in initial_data:
-            initial_data["termination_b_rack"] = getattr(obj.termination_a.parent, "rack", None)
+            initial_data["termination_b_rack"] = getattr(self.termination_a.parent, "rack", None)
 
         form = self.model_form(exclude_id=kwargs.get("termination_a_id"), instance=obj, initial=initial_data)
 
@@ -4983,6 +5003,27 @@ class CableCreateView(generic.ObjectEditView):
             },
         )
 
+    def successful_post(self, request, obj, created, logger):
+        """After saving the Cable, create CableEnd records for both terminations."""
+        if created:
+            # Create CableEnd for side A
+            CableEnd.objects.create(
+                cable=obj,
+                cable_termination=self.termination_a,
+                cable_side=CableEnd.CableSide.A,
+            )
+            # Create CableEnd for side B
+            termination_b_id = request.POST.get("termination_b_id")
+            if termination_b_id:
+                termination_b = self.termination_b_type.model_class().objects.get(pk=termination_b_id)
+                CableEnd.objects.create(
+                    cable=obj,
+                    cable_termination=termination_b,
+                    cable_side=CableEnd.CableSide.B,
+                )
+
+        super().successful_post(request, obj, created, logger)
+
 
 #
 # Connections
@@ -4994,7 +5035,7 @@ class ConnectionsListView(generic.ObjectListView):
 
 
 class ConsoleConnectionsListView(ConnectionsListView):
-    queryset = ConsolePort.objects.filter(_path__isnull=False)
+    queryset = ConsolePort.objects.filter(cable_ends__isnull=False)
     filterset = filters.ConsoleConnectionFilterSet
     filterset_form = forms.ConsoleConnectionFilterForm
     table = tables.ConsoleConnectionTable
@@ -5004,7 +5045,7 @@ class ConsoleConnectionsListView(ConnectionsListView):
 
 
 class PowerConnectionsListView(ConnectionsListView):
-    queryset = PowerPort.objects.filter(_path__isnull=False)
+    queryset = PowerPort.objects.filter(cable_ends__isnull=False)
     filterset = filters.PowerConnectionFilterSet
     filterset_form = forms.PowerConnectionFilterForm
     table = tables.PowerConnectionTable
@@ -5028,19 +5069,10 @@ class InterfaceConnectionsListView(ConnectionsListView):
 
     def get_queryset(self):
         """
-        This is a required so that the call to `ContentType.objects.get_for_model` does not result in a circular import.
+        Get all interfaces that have cables connected.
+        Note: For interface-to-interface connections, both ends will be shown in the list.
         """
-        qs = Interface.objects.filter(_path__isnull=False).exclude(
-            # If an Interface is connected to another Interface, avoid returning both (A, B) and (B, A)
-            # Unfortunately we can't use something consistent to pick which pair to exclude (such as device or name)
-            # as _path.destination is a GenericForeignKey without a corresponding GenericRelation and so cannot be
-            # used for reverse querying.
-            # The below at least ensures uniqueness, but doesn't guarantee whether we get (A, B) or (B, A)
-            # TODO: this is very problematic when filtering the view via FilterSet - if the filterset matches (A), then
-            #       the connection will appear in the table, but if it only matches (B) then the connection will not!
-            _path__destination_type=ContentType.objects.get_for_model(Interface),
-            pk__lt=F("_path__destination_id"),
-        )
+        qs = Interface.objects.filter(cable_ends__isnull=False)
         if self.queryset is None:
             self.queryset = qs
 

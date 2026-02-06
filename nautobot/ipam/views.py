@@ -1098,8 +1098,9 @@ class IPAddressInterfacesView(generic.ObjectView):
                 Prefetch("member_interfaces", queryset=Interface.objects.restrict(request.user)),
                 "_path__destination",
                 "tags",
+                "cable_ends__cable",
             )
-            .select_related("lag", "cable")
+            .select_related("lag")
         )
         interface_table = tables.IPAddressInterfaceTable(data=interfaces, user=request.user, orderable=False)
         if request.user.has_perm("dcim.change_interface") or request.user.has_perm("dcim.delete_interface"):

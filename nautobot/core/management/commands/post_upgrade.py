@@ -97,12 +97,6 @@ class Command(BaseCommand):
             )
             self.stdout.write()
 
-        # Run trace_paths
-        if options.get("trace_paths"):
-            self.stdout.write("Generating cable paths...")
-            call_command("trace_paths", no_input=True)
-            self.stdout.write()
-
         # Run collectstatic
         if options.get("collectstatic"):
             self.stdout.write("Collecting static files...")

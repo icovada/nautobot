@@ -188,7 +188,7 @@ class Circuit(PrimaryModel):
     "locations",
     "webhooks",
 )
-class CircuitTermination(PrimaryModel, PathEndpoint, CableTermination):
+class CircuitTermination(CableTermination, PathEndpoint):
     circuit = models.ForeignKey(to="circuits.Circuit", on_delete=models.CASCADE, related_name="circuit_terminations")
     term_side = models.CharField(max_length=1, choices=CircuitTerminationSideChoices, verbose_name="Termination")
     location = models.ForeignKey(

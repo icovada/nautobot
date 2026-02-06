@@ -23,7 +23,6 @@ from nautobot.dcim.filters import (
 from nautobot.dcim.graphql.mixins import CableTerminationMixin, PathEndpointMixin
 from nautobot.dcim.models import (
     Cable,
-    CablePath,
     ConsolePort,
     ConsoleServerPort,
     Device,
@@ -122,7 +121,7 @@ class CableType(OptimizedNautobotObjectType):
     class Meta:
         model = Cable
         filterset_class = CableFilterSet
-        exclude = ["_termination_a_device", "_termination_b_device"]
+        exclude = []
 
     termination_a_type = graphene.String()
     termination_b_type = graphene.String()
@@ -138,13 +137,6 @@ class CableType(OptimizedNautobotObjectType):
             model = self.termination_b_type.model_class()  # pylint: disable=no-member
             return f"{model._meta.app_label}.{model._meta.model_name}"
         return None
-
-
-class CablePathType(OptimizedNautobotObjectType):
-    """GraphQL type object for CablePath model."""
-
-    class Meta:
-        model = CablePath
 
 
 class InterfaceType(OptimizedNautobotObjectType, CableTerminationMixin, PathEndpointMixin):

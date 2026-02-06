@@ -27,7 +27,6 @@ from nautobot.core.graphql.generators import (
 from nautobot.core.graphql.types import ContentTypeType, DateType, JSON
 from nautobot.core.graphql.utils import str_to_var_name
 from nautobot.dcim.graphql.types import (
-    CablePathType,
     CableType,
     ConsolePortType,
     ConsoleServerPortType,
@@ -58,7 +57,6 @@ registry["graphql_types"] = OrderedDict()
 registry["graphql_types"]["circuits.circuittermination"] = CircuitTerminationType
 registry["graphql_types"]["contenttypes.contenttype"] = ContentTypeType
 registry["graphql_types"]["dcim.cable"] = CableType
-registry["graphql_types"]["dcim.cablepath"] = CablePathType
 registry["graphql_types"]["dcim.consoleport"] = ConsolePortType
 registry["graphql_types"]["dcim.consoleserverport"] = ConsoleServerPortType
 registry["graphql_types"]["dcim.device"] = DeviceType
