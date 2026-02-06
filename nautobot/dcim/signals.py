@@ -9,7 +9,6 @@ from django.dispatch import receiver
 from nautobot.core.signals import disable_for_loaddata
 
 from .models import (
-    Cable,
     ControllerManagedDeviceGroup,
     Device,
     DeviceRedundancyGroup,
@@ -172,35 +171,7 @@ def clear_virtualchassis_members(instance, **kwargs):
 #
 
 
-@receiver(post_save, sender=Cable)
-def update_connected_endpoints(instance, created, raw=False, **kwargs):
-    """
-    When a Cable is saved, ensure CableEnd objects exist for the terminations.
-    Cable paths are now traced on-the-fly via CableEnd relationships.
-    """
-    logger = logging.getLogger(__name__ + ".cable")
-    if raw:
-        logger.debug(f"Skipping endpoint updates for imported cable {instance}")
-        return
-
-    # Create CableEnd objects if they don't exist
-    # This maintains backwards compatibility with Cable.termination_a/b
-    from nautobot.dcim.models.cables import CableEnd
-
-    if instance.termination_a:
-        CableEnd.objects.get_or_create(
-            cable=instance,
-            cable_termination=instance.termination_a,
-            cable_side=CableEnd.CableSide.A,
-            defaults={"position": 0},
-        )
-    if instance.termination_b:
-        CableEnd.objects.get_or_create(
-            cable=instance,
-            cable_termination=instance.termination_b,
-            cable_side=CableEnd.CableSide.B,
-            defaults={"position": 0},
-        )
+    # CableEnd creation is now handled directly in Cable.save()
 
 
 #

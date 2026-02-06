@@ -92,6 +92,83 @@ class Cable(PrimaryModel):
 
         return cls.__status_connected
 
+    def _get_termination(self, side):
+        """Return the CableTermination on the given side (a or b) via CableEnd."""
+        # Check for a pending (not yet saved) termination set via the setter
+        pending = getattr(self, f"_pending_termination_{side}", None)
+        if pending is not None:
+            return pending
+        # Otherwise look it up from the database
+        if self.present_in_database:
+            for cable_end in self.cable_ends.all():
+                if cable_end.cable_side == side:
+                    return cable_end.cable_termination
+        return None
+
+    def _set_termination(self, side, value):
+        """Store a termination to be saved as a CableEnd via the post_save signal."""
+        setattr(self, f"_pending_termination_{side}", value)
+
+    @property
+    def termination_a(self):
+        """Backwards-compatible access to the side A termination via CableEnd."""
+        return self._get_termination("a")
+
+    @termination_a.setter
+    def termination_a(self, value):
+        self._set_termination("a", value)
+
+    @property
+    def termination_b(self):
+        """Backwards-compatible access to the side B termination via CableEnd."""
+        return self._get_termination("b")
+
+    @termination_b.setter
+    def termination_b(self, value):
+        self._set_termination("b", value)
+
+    @property
+    def termination_a_type(self):
+        """Backwards-compatible access to the side A termination content type."""
+        from django.contrib.contenttypes.models import ContentType
+
+        term = self.termination_a
+        if term is not None:
+            return ContentType.objects.get_for_model(term)
+        return None
+
+    @termination_a_type.setter
+    def termination_a_type(self, value):
+        # Stored but not directly used - termination type is derived from the termination object
+        self._pending_termination_a_type = value
+
+    @property
+    def termination_b_type(self):
+        """Backwards-compatible access to the side B termination content type."""
+        from django.contrib.contenttypes.models import ContentType
+
+        term = self.termination_b
+        if term is not None:
+            return ContentType.objects.get_for_model(term)
+        return None
+
+    @termination_b_type.setter
+    def termination_b_type(self, value):
+        # Stored but not directly used - termination type is derived from the termination object
+        self._pending_termination_b_type = value
+
+    @property
+    def termination_a_id(self):
+        """Backwards-compatible access to the side A termination ID."""
+        term = self.termination_a
+        return term.pk if term is not None else None
+
+    @property
+    def termination_b_id(self):
+        """Backwards-compatible access to the side B termination ID."""
+        term = self.termination_b
+        return term.pk if term is not None else None
+
     def clean(self):
         super().clean()
 
@@ -100,18 +177,6 @@ class Cable(PrimaryModel):
             raise ValidationError("Must specify a unit when setting a cable length")
         elif self.length is None:
             self.length_unit = ""
-
-        # Note: Most cable validation is now handled by CableEnd.clean()
-        # The following validations are handled elsewhere:
-        # - Termination existence: Validated by ForeignKey constraint on CableEnd
-        # - Termination already cabled: Validated in CableEnd.clean()
-        # - Interface types (NONCONNECTABLE_IFACE_TYPES): Validated in CableEnd.clean()
-        # - CircuitTermination provider network: Validated in CableEnd.clean()
-        # - Termination immutability: Should be enforced in forms/views
-        # - Compatible termination types: Should be validated in forms when creating cable with both sides
-        # - RearPort position matching: Should be validated in forms
-        # - Self-connection prevention: Should be validated in forms
-        # - FrontPort/RearPort correspondence: Should be validated in forms
 
     def save(self, *args, **kwargs):
         # Store the given length (if any) in meters for use in database ordering
@@ -124,6 +189,19 @@ class Cable(PrimaryModel):
 
         # Update the private pk used in __str__ in case this is a new object (i.e. just got its pk)
         self._pk = self.pk
+
+        # Create CableEnd records for any pending terminations set via the property setters
+        # (e.g. cable.termination_a = interface; cable.save())
+        for side in ("a", "b"):
+            pending = getattr(self, f"_pending_termination_{side}", None)
+            if pending is not None:
+                CableEnd.objects.get_or_create(
+                    cable=self,
+                    cable_termination=pending,
+                    cable_side=side,
+                    defaults={"position": 0},
+                )
+                setattr(self, f"_pending_termination_{side}", None)
 
 
 

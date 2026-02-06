@@ -4266,7 +4266,6 @@ class ConnectCableToDeviceForm(ConnectCableExcludeIDMixin, NautobotModelForm):
             "termination_b_location",
             "termination_b_rack",
             "termination_b_device",
-            "termination_b_id",
             "type",
             "status",
             "label",
@@ -4383,7 +4382,6 @@ class ConnectCableToCircuitTerminationForm(ConnectCableExcludeIDMixin, NautobotM
             "termination_b_provider",
             "termination_b_location",
             "termination_b_circuit",
-            "termination_b_id",
             "type",
             "status",
             "label",
@@ -4431,7 +4429,6 @@ class ConnectCableToPowerFeedForm(ConnectCableExcludeIDMixin, NautobotModelForm)
         fields = [
             "termination_b_rackgroup",
             "termination_b_powerpanel",
-            "termination_b_id",
             "type",
             "status",
             "label",

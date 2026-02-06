@@ -1452,7 +1452,6 @@ class CableFilterSet(NautobotFilterSet, StatusModelFilterSetMixin):
             "label",
             "length",
             "length_unit",
-            # TODO: termination_a_id and termination_b_id removed - need to refactor filtering for CableEnd model
             "tags",
         ]
 
@@ -1481,7 +1480,7 @@ class CableFilterSet(NautobotFilterSet, StatusModelFilterSetMixin):
         """Filter cables by device ID."""
         if not value:
             return queryset
-        return self.filter_device(queryset, "id", value)
+        return self.filter_device(queryset, "device__id", value)
 
     @extend_schema_field({"type": "string"})
     def _termination_type(self, queryset, name, value):

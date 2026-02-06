@@ -696,7 +696,7 @@ class InterfaceConnectionViewSet(ListModelMixin, GenericViewSet):
 
 
 class CableViewSet(NautobotModelViewSet):
-    queryset = Cable.objects.prefetch_related("termination_a", "termination_b")
+    queryset = Cable.objects.prefetch_related("cable_ends__cable_termination")
     serializer_class = serializers.CableSerializer
     filterset_class = filters.CableFilterSet
 

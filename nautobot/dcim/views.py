@@ -4854,7 +4854,7 @@ class CableUIViewSet(NautobotUIViewSet):
     form_class = forms.CableForm
     serializer_class = serializers.CableSerializer
     table_class = tables.CableTable
-    queryset = Cable.objects.prefetch_related("termination_a", "termination_b")
+    queryset = Cable.objects.prefetch_related("cable_ends__cable_termination")
     action_buttons = ("import", "export")
 
     def get_queryset(self):
@@ -4951,9 +4951,8 @@ class CableCreateView(generic.ObjectEditView):
         termination_b_type_name = url_kwargs.get("termination_b_type")
         self.termination_b_type = ContentType.objects.get(model=termination_b_type_name.replace("-", ""))
 
-        # Initialize Cable termination attributes
-        obj.termination_a = termination_a_type.objects.get(pk=termination_a_id)
-        obj.termination_b_type = self.termination_b_type
+        # Store termination A info on the view for later use when creating CableEnd records
+        self.termination_a = termination_a_type.objects.get(pk=termination_a_id)
 
         return obj
 
@@ -4967,11 +4966,11 @@ class CableCreateView(generic.ObjectEditView):
         initial_data = {k: request.GET[k] for k in request.GET}
 
         # Set initial location and rack based on side A termination (if not already set)
-        termination_a_location = getattr(obj.termination_a.parent, "location", None)
+        termination_a_location = getattr(self.termination_a.parent, "location", None)
         if "termination_b_location" not in initial_data:
             initial_data["termination_b_location"] = termination_a_location
         if "termination_b_rack" not in initial_data:
-            initial_data["termination_b_rack"] = getattr(obj.termination_a.parent, "rack", None)
+            initial_data["termination_b_rack"] = getattr(self.termination_a.parent, "rack", None)
 
         form = self.model_form(exclude_id=kwargs.get("termination_a_id"), instance=obj, initial=initial_data)
 
@@ -5003,6 +5002,27 @@ class CableCreateView(generic.ObjectEditView):
                 "js_select_onchange_query": js_select_onchange_query,
             },
         )
+
+    def successful_post(self, request, obj, created, logger):
+        """After saving the Cable, create CableEnd records for both terminations."""
+        if created:
+            # Create CableEnd for side A
+            CableEnd.objects.create(
+                cable=obj,
+                cable_termination=self.termination_a,
+                cable_side=CableEnd.CableSide.A,
+            )
+            # Create CableEnd for side B
+            termination_b_id = request.POST.get("termination_b_id")
+            if termination_b_id:
+                termination_b = self.termination_b_type.model_class().objects.get(pk=termination_b_id)
+                CableEnd.objects.create(
+                    cable=obj,
+                    cable_termination=termination_b,
+                    cable_side=CableEnd.CableSide.B,
+                )
+
+        super().successful_post(request, obj, created, logger)
 
 
 #
