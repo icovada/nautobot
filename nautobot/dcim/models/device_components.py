@@ -733,11 +733,17 @@ class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
         """
         # Calculate aggregate draw of all child power outlets if no numbers have been defined manually
         if self.allocated_draw is None and self.maximum_draw is None:
-            poweroutlet_ct = ContentType.objects.get_for_model(PowerOutlet)
             outlet_ids = PowerOutlet.objects.filter(power_port=self).values_list("pk", flat=True)
-            utilization = PowerPort.objects.filter(
-                _cable_peer_type=poweroutlet_ct, _cable_peer_id__in=outlet_ids
-            ).aggregate(
+
+            # Find PowerPorts connected to these outlets through cables
+            # Query path: PowerPort -> CableEnd -> Cable -> CableEnd -> PowerOutlet
+            connected_powerports = PowerPort.objects.filter(
+                cable_ends__cable__cable_ends__cable_termination__in=outlet_ids
+            ).exclude(
+                pk=self.pk  # Exclude self to avoid double counting
+            )
+
+            utilization = connected_powerports.aggregate(
                 maximum_draw_total=Sum("maximum_draw"),
                 allocated_draw_total=Sum("allocated_draw"),
             )
@@ -758,13 +764,19 @@ class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
             }
 
             # Calculate per-leg aggregates for three-phase feeds
-            if getattr(self._cable_peer, "phase", None) == PowerFeedPhaseChoices.PHASE_3PHASE:
-                # Setup numerator and denominator for later display.
+            cable_peer = self.get_cable_peer()
+            if cable_peer and getattr(cable_peer, "phase", None) == PowerFeedPhaseChoices.PHASE_3PHASE:
+                # Setup numerator and denominator for later display
                 for leg, leg_name in PowerOutletFeedLegChoices:
-                    outlet_ids = PowerOutlet.objects.filter(power_port=self, feed_leg=leg).values_list("pk", flat=True)
-                    utilization = PowerPort.objects.filter(
-                        _cable_peer_type=poweroutlet_ct, _cable_peer_id__in=outlet_ids
-                    ).aggregate(
+                    leg_outlet_ids = PowerOutlet.objects.filter(
+                        power_port=self, feed_leg=leg
+                    ).values_list("pk", flat=True)
+
+                    leg_connected_powerports = PowerPort.objects.filter(
+                        cable_ends__cable__cable_ends__cable_termination__in=leg_outlet_ids
+                    ).exclude(pk=self.pk)
+
+                    utilization = leg_connected_powerports.aggregate(
                         maximum_draw_total=Sum("maximum_draw"),
                         allocated_draw_total=Sum("allocated_draw"),
                     )
@@ -778,7 +790,7 @@ class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
                             "name": leg_name,
                             "allocated": leg_allocated_va,
                             "maximum": leg_maximum_va,
-                            "outlet_count": len(outlet_ids),
+                            "outlet_count": len(leg_outlet_ids),
                         }
                     )
 
