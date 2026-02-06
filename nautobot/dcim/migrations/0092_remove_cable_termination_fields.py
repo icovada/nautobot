@@ -10,7 +10,16 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Remove the legacy Cable termination fields
+        # First, remove constraints that reference the fields we're about to drop
+        migrations.AlterModelOptions(
+            name="cable",
+            options={"ordering": ["pk"]},
+        ),
+        migrations.AlterUniqueTogether(
+            name="cable",
+            unique_together=set(),
+        ),
+        # Now safe to remove the legacy Cable termination fields
         migrations.RemoveField(
             model_name="cable",
             name="termination_a_type",
@@ -27,7 +36,7 @@ class Migration(migrations.Migration):
             model_name="cable",
             name="termination_b_id",
         ),
-        # Remove the device cache fields that depended on termination_a/b
+        # Remove the device cache fields
         migrations.RemoveField(
             model_name="cable",
             name="_termination_a_device",
@@ -36,18 +45,12 @@ class Migration(migrations.Migration):
             model_name="cable",
             name="_termination_b_device",
         ),
-        migrations.AlterModelOptions(
-            name="cable",
-            options={"ordering": ["pk"]},
-        ),
-        migrations.AlterUniqueTogether(
-            name="cable",
-            unique_together=set(),
-        ),
+        # CableEnd constraints
         migrations.AlterUniqueTogether(
             name="cableend",
             unique_together={("cable_termination",)},
         ),
+        # Remove legacy CableTermination fields
         migrations.RemoveField(
             model_name="cabletermination",
             name="_cable_peer_id",
