@@ -12,7 +12,7 @@ def populate_circuittermination_cabletermination(apps, schema_editor):
     ContentType = apps.get_model("contenttypes", "ContentType")
     TaggedItem = apps.get_model("extras", "TaggedItem")
 
-    circuit_ct = ContentType.objects.get(app_label="circuits", model="circuittermination")
+    circuit_ct, _ = ContentType.objects.get_or_create(app_label="circuits", model="circuittermination")
     cable_ct, _ = ContentType.objects.get_or_create(
         app_label="dcim",
         model="cabletermination",
@@ -45,7 +45,7 @@ def reverse_populate(apps, schema_editor):
     Remove CableTermination records for CircuitTermination instances.
     """
     ContentType = apps.get_model("contenttypes", "ContentType")
-    content_type = ContentType.objects.get(app_label="circuits", model="circuittermination")
+    content_type, _ = ContentType.objects.get_or_create(app_label="circuits", model="circuittermination")
     CableTermination = apps.get_model("dcim", "CableTermination")
     CableTermination.objects.filter(polymorphic_ctype=content_type).delete()
 

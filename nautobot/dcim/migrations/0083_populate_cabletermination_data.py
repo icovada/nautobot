@@ -31,7 +31,7 @@ def populate_cabletermination_from_children(apps, schema_editor):
 
     for model_name in child_models:
         Model = apps.get_model("dcim", model_name)
-        child_ct = ContentType.objects.get(app_label="dcim", model=model_name.lower())
+        child_ct, _ = ContentType.objects.get_or_create(app_label="dcim", model=model_name.lower())
 
         # Get all instances of this model
         for instance in Model.objects.all():

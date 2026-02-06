@@ -12,7 +12,7 @@ def populate_powerfeed_cabletermination(apps, schema_editor):
     ContentType = apps.get_model("contenttypes", "ContentType")
     TaggedItem = apps.get_model("extras", "TaggedItem")
 
-    powerfeed_ct = ContentType.objects.get(app_label="dcim", model="powerfeed")
+    powerfeed_ct, _ = ContentType.objects.get_or_create(app_label="dcim", model="powerfeed")
     cable_ct, _ = ContentType.objects.get_or_create(
         app_label="dcim",
         model="cabletermination",
@@ -45,7 +45,7 @@ def reverse_populate(apps, schema_editor):
     Remove CableTermination records for PowerFeed instances.
     """
     ContentType = apps.get_model("contenttypes", "ContentType")
-    content_type = ContentType.objects.get(app_label="dcim", model="powerfeed")
+    content_type, _ = ContentType.objects.get_or_create(app_label="dcim", model="powerfeed")
     CableTermination = apps.get_model("dcim", "CableTermination")
     CableTermination.objects.filter(polymorphic_ctype=content_type).delete()
 
