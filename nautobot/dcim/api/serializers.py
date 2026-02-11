@@ -110,10 +110,16 @@ class CableTerminationModelSerializerMixin(serializers.ModelSerializer):
     cable_peer_type = serializers.SerializerMethodField(read_only=True)
     cable_peer = serializers.SerializerMethodField(read_only=True)
 
+    def to_representation(self, instance):
+        # Cache cable_peer lookup to avoid calling get_cable_peer() multiple times
+        instance._cached_cable_peer = instance.get_cable_peer()
+        return super().to_representation(instance)
+
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_cable_peer_type(self, obj):
-        if obj._cable_peer is not None:
-            return f"{obj._cable_peer._meta.app_label}.{obj._cable_peer._meta.model_name}"
+        cable_peer = getattr(obj, "_cached_cable_peer", None)
+        if cable_peer is not None:
+            return f"{cable_peer._meta.app_label}.{cable_peer._meta.model_name}"
         return None
 
     @extend_schema_field(
@@ -128,9 +134,10 @@ class CableTerminationModelSerializerMixin(serializers.ModelSerializer):
         """
         Return the appropriate serializer for the cable termination model.
         """
-        if obj._cable_peer is not None:
+        cable_peer = getattr(obj, "_cached_cable_peer", None)
+        if cable_peer is not None:
             depth = get_nested_serializer_depth(self)
-            return return_nested_serializer_data_based_on_depth(self, depth, obj, obj._cable_peer, "_cable_peer")
+            return return_nested_serializer_data_based_on_depth(self, depth, obj, cable_peer, "cable_peer")
         return None
 
 
