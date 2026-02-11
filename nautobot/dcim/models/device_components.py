@@ -225,7 +225,35 @@ class ModularComponentModel(ComponentModel):
 class RestrictedPolymorphicQuerySet(RestrictedQuerySet, PolymorphicQuerySet):
     """QuerySet that combines Nautobot's RestrictedQuerySet with django-polymorphic's PolymorphicQuerySet."""
 
-    pass
+    def _translate_cable_lookups(self, kwargs):
+        """
+        Translate cable-related lookups to work with the new CableEnd model.
+
+        For backwards compatibility, cable__isnull queries are translated to cable_ends__isnull.
+        """
+        translated = {}
+        for key, value in kwargs.items():
+            # Translate cable__isnull to cable_ends__isnull
+            if key == 'cable__isnull':
+                translated['cable_ends__isnull'] = value
+            # Translate cable to cable_ends__cable for other lookups
+            elif key.startswith('cable__') and not key.startswith('cable_ends__'):
+                # Replace cable__ with cable_ends__cable__
+                new_key = 'cable_ends__' + key
+                translated[new_key] = value
+            else:
+                translated[key] = value
+        return translated
+
+    def filter(self, *args, **kwargs):
+        """Override filter to translate cable-related lookups."""
+        kwargs = self._translate_cable_lookups(kwargs)
+        return super().filter(*args, **kwargs)
+
+    def exclude(self, *args, **kwargs):
+        """Override exclude to translate cable-related lookups."""
+        kwargs = self._translate_cable_lookups(kwargs)
+        return super().exclude(*args, **kwargs)
 
 
 class PolymorphicBaseManager(PolymorphicManager, BaseManager):
