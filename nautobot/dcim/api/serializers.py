@@ -828,6 +828,8 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
         if side.lower() not in ["a", "b"]:
             raise ValueError("Termination side must be either A or B.")
         termination = getattr(obj, f"termination_{side.lower()}")
+        if termination is None:
+            return None
         depth = get_nested_serializer_depth(self)
         return return_nested_serializer_data_based_on_depth(
             self, depth, obj, termination, f"termination_{side.lower()}"
