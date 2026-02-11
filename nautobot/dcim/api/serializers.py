@@ -117,7 +117,12 @@ class CableTerminationModelSerializerMixin(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_cable_peer_type(self, obj):
-        cable_peer = getattr(obj, "_cached_cable_peer", None)
+        # Use cached value if available, otherwise compute it
+        if hasattr(obj, "_cached_cable_peer"):
+            cable_peer = obj._cached_cable_peer
+        else:
+            cable_peer = obj.get_cable_peer()
+
         if cable_peer is not None:
             return f"{cable_peer._meta.app_label}.{cable_peer._meta.model_name}"
         return None
@@ -134,7 +139,12 @@ class CableTerminationModelSerializerMixin(serializers.ModelSerializer):
         """
         Return the appropriate serializer for the cable termination model.
         """
-        cable_peer = getattr(obj, "_cached_cable_peer", None)
+        # Use cached value if available, otherwise compute it
+        if hasattr(obj, "_cached_cable_peer"):
+            cable_peer = obj._cached_cable_peer
+        else:
+            cable_peer = obj.get_cable_peer()
+
         if cable_peer is not None:
             depth = get_nested_serializer_depth(self)
             return return_nested_serializer_data_based_on_depth(self, depth, obj, cable_peer, "cable_peer")
