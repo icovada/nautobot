@@ -99,7 +99,8 @@ class Cable(PrimaryModel):
         if pending is not None:
             return pending
         # Otherwise look it up from the database
-        if self.present_in_database:
+        # Need PK to access reverse relationships
+        if self.present_in_database and self.pk:
             for cable_end in self.cable_ends.all():
                 if cable_end.cable_side == side:
                     return cable_end.cable_termination
