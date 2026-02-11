@@ -264,6 +264,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         This property efficiently uses prefetched data when available (via prefetch_related("cable_ends__cable"))
         to avoid N+1 query problems.
         """
+        # Cannot access reverse relationships without a PK
+        if not self.pk:
+            return None
         # Iterate to use prefetched data - Django recognizes this pattern
         for cable_end in self.cable_ends.all():
             return cable_end.cable
@@ -285,6 +288,10 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         This method efficiently uses prefetched data when available to avoid N+1 queries.
         When cable data is prefetched properly, Django automatically uses the cached data.
         """
+        # Cannot access reverse relationships without a PK
+        if not self.pk:
+            return None
+
         cable = self.cable
         if not cable:
             return None
@@ -328,6 +335,10 @@ class CableTermination(PolymorphicModel, PrimaryModel):
         Returns:
             CableTermination or None: The endpoint at the remote end of the cable path.
         """
+        # Cannot trace without a PK
+        if not self.pk:
+            return None
+
         from django.db import connection
 
         ce_table = "dcim_cableend"  # CableEnd table
@@ -425,6 +436,10 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                   CableEnd, CableTermination, CableTermination, CableEnd, Cable,
                   CableEnd, CableTermination] or empty list if no path exists.
         """
+        # Cannot trace without a PK
+        if not self.pk:
+            return []
+
         from django.db import connection
 
         from nautobot.dcim.models.cables import Cable, CableEnd
@@ -931,7 +946,7 @@ class BaseInterface(RelationshipModel):
             self.status = status
 
         # Only "tagged" interfaces may have tagged VLANs assigned. ("tagged all" implies all VLANs are assigned.)
-        if self.present_in_database and self.mode != InterfaceModeChoices.MODE_TAGGED:  # pylint: disable=no-member
+        if self.present_in_database and self.pk and self.mode != InterfaceModeChoices.MODE_TAGGED:  # pylint: disable=no-member
             self.tagged_vlans.clear()  # pylint: disable=no-member  # Intf/VMIntf both have tagged_vlans
 
         return super().save(*args, **kwargs)
@@ -1097,14 +1112,16 @@ class Interface(CableTermination, ModularComponentModel, PathEndpoint, BaseInter
         super().clean()
 
         # VRF validation
-        if self.vrf and self.parent and self.vrf not in self.parent.vrfs.all():
-            # TODO(jathan): Or maybe we automatically add the VRF to the device?
-            raise ValidationError({"vrf": "VRF must be assigned to same Device."})
+        # Only validate if parent has PK (can't access reverse relationships otherwise)
+        if self.vrf and self.parent and hasattr(self.parent, 'pk') and self.parent.pk:
+            if self.vrf not in self.parent.vrfs.all():
+                # TODO(jathan): Or maybe we automatically add the VRF to the device?
+                raise ValidationError({"vrf": "VRF must be assigned to same Device."})
 
         # LAG validation
         if self.lag is not None:
-            # A LAG interface cannot be its own parent
-            if self.lag_id == self.pk:
+            # A LAG interface cannot be its own parent (only check for existing instances)
+            if self.pk and self.lag_id == self.pk:
                 raise ValidationError({"lag": "A LAG interface cannot be its own parent."})
 
             # An interface's LAG must belong to the same device or virtual chassis
@@ -1457,14 +1474,16 @@ class RearPort(CableTermination, ModularComponentModel):
         super().clean()
 
         # Check that positions count is greater than or equal to the number of associated FrontPorts
-        front_port_count = self.front_ports.count()
-        if self.positions < front_port_count:
-            raise ValidationError(
-                {
-                    "positions": f"The number of positions cannot be less than the number of mapped front ports "
-                    f"({front_port_count})"
-                }
-            )
+        # Only validate if instance has been saved (has PK) - can't access reverse relationships otherwise
+        if self.pk:
+            front_port_count = self.front_ports.count()
+            if self.positions < front_port_count:
+                raise ValidationError(
+                    {
+                        "positions": f"The number of positions cannot be less than the number of mapped front ports "
+                        f"({front_port_count})"
+                    }
+                )
 
 
 #
