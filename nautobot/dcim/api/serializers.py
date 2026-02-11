@@ -865,6 +865,81 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
     def get_termination_b(self, obj):
         return self._get_termination(obj, "b")
 
+    def create(self, validated_data):
+        """Create Cable and associated CableEnd records."""
+        from nautobot.dcim.models import CableEnd
+
+        # Extract termination data
+        termination_a_type = validated_data.pop("termination_a_type", None)
+        termination_a_id = validated_data.pop("termination_a_id", None)
+        termination_b_type = validated_data.pop("termination_b_type", None)
+        termination_b_id = validated_data.pop("termination_b_id", None)
+
+        # Create the Cable instance
+        cable = super().create(validated_data)
+
+        # Create CableEnd records for each termination
+        if termination_a_id and termination_a_type:
+            termination_a = termination_a_type.get_object_for_this_type(pk=termination_a_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_a,
+                cable_side="a",
+                position=0,
+            )
+
+        if termination_b_id and termination_b_type:
+            termination_b = termination_b_type.get_object_for_this_type(pk=termination_b_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_b,
+                cable_side="b",
+                position=0,
+            )
+
+        return cable
+
+    def update(self, instance, validated_data):
+        """Update Cable and associated CableEnd records."""
+        from nautobot.dcim.models import CableEnd
+
+        # Extract termination data
+        termination_a_type = validated_data.pop("termination_a_type", None)
+        termination_a_id = validated_data.pop("termination_a_id", None)
+        termination_b_type = validated_data.pop("termination_b_type", None)
+        termination_b_id = validated_data.pop("termination_b_id", None)
+
+        # Update the Cable instance
+        cable = super().update(instance, validated_data)
+
+        # Update CableEnd for side A if provided
+        if termination_a_id is not None and termination_a_type is not None:
+            # Remove existing CableEnd for side A
+            CableEnd.objects.filter(cable=cable, cable_side="a").delete()
+            # Create new CableEnd
+            termination_a = termination_a_type.get_object_for_this_type(pk=termination_a_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_a,
+                cable_side="a",
+                position=0,
+            )
+
+        # Update CableEnd for side B if provided
+        if termination_b_id is not None and termination_b_type is not None:
+            # Remove existing CableEnd for side B
+            CableEnd.objects.filter(cable=cable, cable_side="b").delete()
+            # Create new CableEnd
+            termination_b = termination_b_type.get_object_for_this_type(pk=termination_b_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_b,
+                cable_side="b",
+                position=0,
+            )
+
+        return cable
+
 
 class TracedCableSerializer(serializers.ModelSerializer):
     """
