@@ -11,6 +11,7 @@ from django.db.models import Sum
 from django.utils.functional import classproperty
 from polymorphic.managers import PolymorphicManager
 from polymorphic.models import PolymorphicModel
+from polymorphic.query import PolymorphicQuerySet
 
 from nautobot.core.constants import CHARFIELD_MAX_LENGTH
 from nautobot.core.models.fields import ForeignKeyWithAutoRelatedName, MACAddressCharField, NaturalOrderingField
@@ -221,6 +222,12 @@ class ModularComponentModel(ComponentModel):
             raise ValidationError("Either device or module must be set")
 
 
+class RestrictedPolymorphicQuerySet(RestrictedQuerySet, PolymorphicQuerySet):
+    """QuerySet that combines Nautobot's RestrictedQuerySet with django-polymorphic's PolymorphicQuerySet."""
+
+    pass
+
+
 class PolymorphicBaseManager(PolymorphicManager, BaseManager):
     """
     Custom manager that combines PolymorphicManager with Nautobot's BaseManager.
@@ -241,7 +248,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
     """
 
     # Use custom manager that combines PolymorphicManager with BaseManager
-    objects = PolymorphicBaseManager.from_queryset(RestrictedQuerySet)()
+    objects = PolymorphicBaseManager.from_queryset(RestrictedPolymorphicQuerySet)()
+
+    is_metadata_associable_model = False
 
     class Meta:
         # No longer abstract - this is now a concrete table
@@ -647,6 +656,8 @@ class ConsolePort(CableTermination, ModularComponentModel, PathEndpoint):
     A physical console port within a Device or Module. ConsolePorts connect to ConsoleServerPorts.
     """
 
+    is_metadata_associable_model = True
+
     type = models.CharField(
         max_length=50,
         choices=ConsolePortTypeChoices,
@@ -665,6 +676,8 @@ class ConsoleServerPort(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical port within a Device or Module (typically a designated console server) which provides access to ConsolePorts.
     """
+
+    is_metadata_associable_model = True
 
     type = models.CharField(
         max_length=50,
@@ -691,6 +704,8 @@ class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical power supply (intake) port within a Device or Module. PowerPorts connect to PowerOutlets.
     """
+
+    is_metadata_associable_model = True
 
     type = models.CharField(
         max_length=50,
@@ -824,6 +839,8 @@ class PowerOutlet(CableTermination, ModularComponentModel, PathEndpoint):
     """
     A physical power outlet (output) within a Device or Module which provides power to a PowerPort.
     """
+
+    is_metadata_associable_model = True
 
     type = models.CharField(
         max_length=50,
@@ -1013,6 +1030,8 @@ class Interface(CableTermination, ModularComponentModel, PathEndpoint, BaseInter
     """
     A network interface within a Device or Module. A physical Interface can connect to exactly one other Interface.
     """
+
+    is_metadata_associable_model = True
 
     # Override ComponentModel._name to specify naturalize_interface function
     _name = NaturalOrderingField(
@@ -1377,6 +1396,8 @@ class FrontPort(CableTermination, ModularComponentModel):
     A pass-through port on the front of a Device or Module.
     """
 
+    is_metadata_associable_model = True
+
     type = models.CharField(max_length=50, choices=PortTypeChoices)
     rear_port = models.ForeignKey(to="dcim.RearPort", on_delete=models.CASCADE, related_name="front_ports")
     rear_port_position = models.PositiveSmallIntegerField(
@@ -1420,6 +1441,8 @@ class RearPort(CableTermination, ModularComponentModel):
     """
     A pass-through port on the rear of a Device or Module.
     """
+
+    is_metadata_associable_model = True
 
     type = models.CharField(max_length=50, choices=PortTypeChoices)
     positions = models.PositiveSmallIntegerField(

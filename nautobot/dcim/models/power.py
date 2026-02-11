@@ -115,6 +115,8 @@ class PowerFeed(CableTermination, PathEndpoint):
     An electrical circuit delivered from a PowerPanel.
     """
 
+    is_metadata_associable_model = True
+
     power_panel = models.ForeignKey(
         to="PowerPanel",
         on_delete=models.PROTECT,
