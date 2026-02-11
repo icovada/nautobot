@@ -1427,15 +1427,13 @@ class CableFilterSet(NautobotFilterSet, StatusModelFilterSetMixin):
         method="filter_device_id",
         label="Device (ID)",
     )
-    device = MultiValueCharFilter(method="filter_device", field_name="device__name", label="Device (name)")
-    rack_id = MultiValueUUIDFilter(method="filter_device", field_name="device__rack_id", label="Rack (ID)")
-    rack = MultiValueCharFilter(method="filter_device", field_name="device__rack__name", label="Rack (name)")
-    location_id = MultiValueUUIDFilter(method="filter_device", field_name="device__location_id", label="Location (ID)")
-    location = MultiValueCharFilter(
-        method="filter_device", field_name="device__location__name", label="Location (name)"
-    )
-    tenant_id = MultiValueUUIDFilter(method="filter_device", field_name="device__tenant_id", label="Tenant (ID)")
-    tenant = MultiValueCharFilter(method="filter_device", field_name="device__tenant__name", label="Tenant (name)")
+    device = MultiValueCharFilter(method="filter_device_name", label="Device (name)")
+    rack_id = MultiValueUUIDFilter(method="filter_rack_id", label="Rack (ID)")
+    rack = MultiValueCharFilter(method="filter_rack_name", label="Rack (name)")
+    location_id = MultiValueUUIDFilter(method="filter_location_id", label="Location (ID)")
+    location = MultiValueCharFilter(method="filter_location_name", label="Location (name)")
+    tenant_id = MultiValueUUIDFilter(method="filter_tenant_id", label="Tenant (ID)")
+    tenant = MultiValueCharFilter(method="filter_tenant_name", label="Tenant (name)")
     termination_type = ContentTypeMultipleChoiceFilter(
         choices=FeatureQuery("cable_terminations").get_choices,
         conjoined=False,
@@ -1455,32 +1453,50 @@ class CableFilterSet(NautobotFilterSet, StatusModelFilterSetMixin):
             "tags",
         ]
 
-    def filter_device(self, queryset, name, value):
-        """Filter cables by device through CableEnd -> CableTermination."""
-        # Query each component type for matching devices
-        # All device components have either device or module.device
+    def _filter_by_component_field(self, queryset, field_lookup, value):
+        """Filter cables by querying component models for matching termination IDs."""
         component_models = [ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet, Interface, FrontPort, RearPort]
         termination_ids = set()
 
         for model in component_models:
-            # Try direct device field filter
-            matching = model.objects.filter(**{f"{name}__in": value}).values_list("pk", flat=True)
+            matching = model.objects.filter(**{f"{field_lookup}__in": value}).values_list("pk", flat=True)
             termination_ids.update(matching)
 
             # Also try through module.device for modular components
             if hasattr(model, "module"):
+                module_lookup = field_lookup.replace("device__", "module__device__", 1)
                 matching_module = model.objects.filter(
-                    **{f"module__device__{name}__in": value}
+                    **{f"{module_lookup}__in": value}
                 ).values_list("pk", flat=True)
                 termination_ids.update(matching_module)
 
         return queryset.filter(cable_ends__cable_termination_id__in=list(termination_ids)).distinct()
 
     def filter_device_id(self, queryset, name, value):
-        """Filter cables by device ID."""
         if not value:
             return queryset
-        return self.filter_device(queryset, "device__id", value)
+        return self._filter_by_component_field(queryset, "device__id", value)
+
+    def filter_device_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__name", value)
+
+    def filter_rack_id(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__rack__id", value)
+
+    def filter_rack_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__rack__name", value)
+
+    def filter_location_id(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__location__id", value)
+
+    def filter_location_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__location__name", value)
+
+    def filter_tenant_id(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__tenant__id", value)
+
+    def filter_tenant_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__tenant__name", value)
 
     @extend_schema_field({"type": "string"})
     def _termination_type(self, queryset, name, value):
