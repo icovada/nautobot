@@ -4,6 +4,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from nautobot.core.constants import CHARFIELD_MAX_LENGTH
+from nautobot.dcim.models.device_components import ModularComponentModel
 from nautobot.core.models.generics import PrimaryModel
 from nautobot.core.models.validators import ExclusionValidator
 from nautobot.dcim.choices import (
@@ -110,7 +111,7 @@ class PowerPanel(PrimaryModel):
     "statuses",
     "webhooks",
 )
-class PowerFeed(CableTermination, PathEndpoint):
+class PowerFeed(CableTermination, ModularComponentModel, PathEndpoint):
     """
     An electrical circuit delivered from a PowerPanel.
     """
