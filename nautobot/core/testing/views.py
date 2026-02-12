@@ -31,7 +31,7 @@ from nautobot.core.testing.utils import extract_page_title
 from nautobot.core.ui.object_detail import ObjectsTablePanel
 from nautobot.core.utils import lookup
 from nautobot.core.views.mixins import NautobotViewSetMixin, PERMISSIONS_ACTION_MAP
-from nautobot.dcim.models.device_components import ComponentModel, ModularComponentModel
+from nautobot.dcim.models.device_components import CableTermination, ComponentModel
 from nautobot.extras import choices as extras_choices, models as extras_models, querysets as extras_querysets
 from nautobot.extras.forms import CustomFieldModelFormMixin, RelationshipModelFormMixin
 from nautobot.extras.models import CustomFieldModel, RelationshipModel
@@ -1892,7 +1892,7 @@ class ViewTestCases:
             if self.model._meta.label_lower == "virtualization.vminterface":
                 self.skipTest("Not applicable to VMInterface")
             expected_labels = ["Description", "Device"]
-            if issubclass(self.model, ModularComponentModel):
+            if issubclass(self.model, CableTermination):
                 expected_labels.append("Module")
 
             self.add_permissions(f"{self.model._meta.app_label}.add_{self.model._meta.model_name}")

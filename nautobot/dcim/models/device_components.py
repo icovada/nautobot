@@ -79,7 +79,7 @@ class ComponentModel(PrimaryModel):
     An abstract model inherited by any model which has a parent Device.
     """
 
-    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE)
+    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE, blank=True, null=True)
     name = models.CharField(max_length=CHARFIELD_MAX_LENGTH, db_index=True)
     _name = NaturalOrderingField(target_field="name", max_length=CHARFIELD_MAX_LENGTH, blank=True, db_index=True)
     label = models.CharField(max_length=CHARFIELD_MAX_LENGTH, blank=True, help_text="Physical label")
@@ -116,110 +116,6 @@ class ComponentModel(PrimaryModel):
         return self.device
 
 
-class ModularComponentModel(ComponentModel):
-    device = ForeignKeyWithAutoRelatedName(
-        to="dcim.Device",
-        on_delete=models.CASCADE,
-        blank=True,
-        null=True,
-    )
-    module = ForeignKeyWithAutoRelatedName(
-        to="dcim.Module",
-        on_delete=models.CASCADE,
-        blank=True,
-        null=True,
-    )
-
-    natural_key_field_names = ["device", "module", "name"]
-
-    class Meta:
-        abstract = True
-        ordering = ("device", "module__id", "_name")  # Module.ordering is complex/expensive so don't order by module
-        constraints = [
-            models.UniqueConstraint(
-                fields=("device", "name"),
-                name="%(app_label)s_%(class)s_device_name_unique",
-            ),
-            models.UniqueConstraint(
-                fields=("module", "name"),
-                name="%(app_label)s_%(class)s_module_name_unique",
-            ),
-        ]
-
-    @property
-    def parent(self):
-        """Device that this component belongs to, walking up module inheritance if necessary."""
-        return self.module.device if self.module else self.device  # pylint: disable=no-member
-
-    def render_name_template(self, save=False):
-        """
-        Replace the {module}, {module.parent}, {module.parent.parent}, etc. variables in the name
-        field with the actual module bay positions.
-
-        Args:
-            save (bool, optional): If True, save the object after updating the name field. Defaults to False.
-
-        If a module bay position is blank, it will be skipped and the parents will be checked until a non-blank
-        position is found. If all parent module bays are exhausted, the variable is left as-is.
-
-        Example:
-            - Device (name="Device 1")
-              - ModuleBay (position="A")
-                - Module
-                  - ModuleBay (position="")
-                    - Module
-                      - Interface (name="{module}{module.parent}")
-
-            The deeply nested interface would be named "A{module.parent}" after calling this method.
-        """
-        if self.module and self.module.parent_module_bay and "{module" in self.name:  # pylint: disable=no-member
-            name = ""
-            module_bay = self.module.parent_module_bay  # pylint: disable=no-member
-            positions = []
-            while module_bay is not None:
-                position = getattr(module_bay, "position", None)
-                if position:
-                    positions.append(position)
-                module_bay = getattr(getattr(module_bay, "parent_module", None), "parent_module_bay", None)
-            for part in re.split(r"({module(?:\.parent)*})", self.name):
-                if re.fullmatch(r"{module(\.parent)*}", part):
-                    depth = part.count(".parent")
-                    if depth < len(positions):
-                        name += positions[depth]
-                        continue
-                name += part
-            if self.name != name:
-                self.name = name
-                if save:
-                    self.save(update_fields=["_name", "name"])
-
-    render_name_template.alters_data = True
-
-    def to_objectchange(self, action, **kwargs):
-        """
-        Return a new ObjectChange with the `related_object` pinned to the parent `device` or `module`.
-        """
-        if "related_object" in kwargs:
-            return super().to_objectchange(action, **kwargs)
-
-        # Annotate the parent
-        try:
-            parent = self.device if self.device else self.module
-        except ObjectDoesNotExist:
-            # The parent may have already been deleted
-            parent = None
-
-        return super().to_objectchange(action, related_object=parent, **kwargs)
-
-    def clean(self):
-        super().clean()
-
-        # Validate that a Device or Module is set, but not both
-        if self.device and self.module:
-            raise ValidationError("Only one of device or module must be set")
-
-        if not (self.device or self.module):
-            raise ValidationError("Either device or module must be set")
 
 
 class RestrictedPolymorphicQuerySet(RestrictedQuerySet, PolymorphicQuerySet):
@@ -275,6 +171,13 @@ class CableTermination(PolymorphicModel, PrimaryModel):
     Use `get_cable_peer()` to get the immediate peer on the opposite side of the cable.
     """
 
+    module = ForeignKeyWithAutoRelatedName(
+        to="dcim.Module",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+    )
+
     # Use custom manager that combines PolymorphicManager with BaseManager
     objects = PolymorphicBaseManager.from_queryset(RestrictedPolymorphicQuerySet)()
 
@@ -283,6 +186,79 @@ class CableTermination(PolymorphicModel, PrimaryModel):
     class Meta:
         # No longer abstract - this is now a concrete table
         pass
+
+    @property
+    def parent(self):
+        """Device that this component belongs to, walking up module inheritance if necessary."""
+        device = getattr(self, "device", None)
+        if self.module:
+            return self.module.device  # pylint: disable=no-member
+        return device
+
+    def render_name_template(self, save=False):
+        """
+        Replace the {module}, {module.parent}, {module.parent.parent}, etc. variables in the name
+        field with the actual module bay positions.
+
+        Args:
+            save (bool, optional): If True, save the object after updating the name field. Defaults to False.
+
+        If a module bay position is blank, it will be skipped and the parents will be checked until a non-blank
+        position is found. If all parent module bays are exhausted, the variable is left as-is.
+        """
+        name_field = getattr(self, "name", None)
+        if self.module and self.module.parent_module_bay and name_field and "{module" in name_field:  # pylint: disable=no-member
+            name = ""
+            module_bay = self.module.parent_module_bay  # pylint: disable=no-member
+            positions = []
+            while module_bay is not None:
+                position = getattr(module_bay, "position", None)
+                if position:
+                    positions.append(position)
+                module_bay = getattr(getattr(module_bay, "parent_module", None), "parent_module_bay", None)
+            for part in re.split(r"({module(?:\.parent)*})", name_field):
+                if re.fullmatch(r"{module(\.parent)*}", part):
+                    depth = part.count(".parent")
+                    if depth < len(positions):
+                        name += positions[depth]
+                        continue
+                name += part
+            if self.name != name:
+                self.name = name
+                if save:
+                    self.save(update_fields=["_name", "name"])
+
+    render_name_template.alters_data = True
+
+    def to_objectchange(self, action, **kwargs):
+        """
+        Return a new ObjectChange with the `related_object` pinned to the parent `device` or `module`.
+        """
+        if "related_object" in kwargs:
+            return super().to_objectchange(action, **kwargs)
+
+        # Annotate the parent
+        try:
+            device = getattr(self, "device", None)
+            parent = device if device else self.module
+        except ObjectDoesNotExist:
+            # The parent may have already been deleted
+            parent = None
+
+        return super().to_objectchange(action, related_object=parent, **kwargs)
+
+    def clean(self):
+        super().clean()
+
+        # Validate that a Device or Module is set, but not both (only for models that have a device field)
+        device = getattr(self, "device", None)
+        if device and self.module:
+            raise ValidationError("Only one of device or module must be set")
+
+        # Only enforce "at least one required" for models that have a device field (i.e., ComponentModel subclasses)
+        if hasattr(self, "device") and hasattr(type(self), "device"):
+            if not (device or self.module):
+                raise ValidationError("Either device or module must be set")
 
     @property
     def cable(self):
@@ -694,12 +670,14 @@ class PathEndpoint(models.Model):
     "graphql",
     "webhooks",
 )
-class ConsolePort(CableTermination, ModularComponentModel, PathEndpoint):
+class ConsolePort(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical console port within a Device or Module. ConsolePorts connect to ConsoleServerPorts.
     """
 
     is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -707,6 +685,15 @@ class ConsolePort(CableTermination, ModularComponentModel, PathEndpoint):
         blank=True,
         help_text="Physical port type",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_consoleport_device_name_unique",
+            ),
+        ]
 
 
 #
@@ -715,12 +702,14 @@ class ConsolePort(CableTermination, ModularComponentModel, PathEndpoint):
 
 
 @extras_features("custom_links", "cable_terminations", "custom_validators", "graphql", "webhooks")
-class ConsoleServerPort(CableTermination, ModularComponentModel, PathEndpoint):
+class ConsoleServerPort(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical port within a Device or Module (typically a designated console server) which provides access to ConsolePorts.
     """
 
     is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -728,6 +717,15 @@ class ConsoleServerPort(CableTermination, ModularComponentModel, PathEndpoint):
         blank=True,
         help_text="Physical port type",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_consoleserverport_device_name_unique",
+            ),
+        ]
 
 
 #
@@ -743,12 +741,14 @@ class ConsoleServerPort(CableTermination, ModularComponentModel, PathEndpoint):
     "graphql",
     "webhooks",
 )
-class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
+class PowerPort(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical power supply (intake) port within a Device or Module. PowerPorts connect to PowerOutlets.
     """
 
     is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -775,6 +775,15 @@ class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
         validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("1.00"))],
         help_text="Power factor (0.01-1.00) for converting between watts (W) and volt-amps (VA). Defaults to 0.95.",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_powerport_device_name_unique",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -878,12 +887,14 @@ class PowerPort(CableTermination, ModularComponentModel, PathEndpoint):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class PowerOutlet(CableTermination, ModularComponentModel, PathEndpoint):
+class PowerOutlet(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical power outlet (output) within a Device or Module which provides power to a PowerPort.
     """
 
     is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -905,6 +916,15 @@ class PowerOutlet(CableTermination, ModularComponentModel, PathEndpoint):
         blank=True,
         help_text="Phase (for three-phase feeds)",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_poweroutlet_device_name_unique",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -1069,7 +1089,7 @@ class BaseInterface(RelationshipModel):
     "statuses",
     "webhooks",
 )
-class Interface(CableTermination, ModularComponentModel, PathEndpoint, BaseInterface):
+class Interface(CableTermination, ComponentModel, PathEndpoint, BaseInterface):
     """
     A network interface within a Device or Module. A physical Interface can connect to exactly one other Interface.
     """
@@ -1133,8 +1153,16 @@ class Interface(CableTermination, ModularComponentModel, PathEndpoint, BaseInter
     speed = models.PositiveIntegerField(null=True, blank=True)
     duplex = models.CharField(max_length=10, choices=InterfaceDuplexChoices, blank=True, default="")
 
-    class Meta(ModularComponentModel.Meta):
+    natural_key_field_names = ["device", "module", "name"]
+
+    class Meta:
         ordering = ("device", "module__id", CollateAsChar("_name"))  # Module.ordering is complex; don't order by module
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_interface_device_name_unique",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -1436,7 +1464,7 @@ class InterfaceRedundancyGroupAssociation(BaseModel, ChangeLoggedModel):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class FrontPort(CableTermination, ModularComponentModel):
+class FrontPort(CableTermination, ComponentModel):
     """
     A pass-through port on the front of a Device or Module.
     """
@@ -1455,9 +1483,13 @@ class FrontPort(CableTermination, ModularComponentModel):
 
     natural_key_field_names = ["device", "module", "name", "rear_port", "rear_port_position"]
 
-    class Meta(ModularComponentModel.Meta):
+    class Meta:
+        ordering = ("device", "module__id", "_name")
         constraints = [
-            *ModularComponentModel.Meta.constraints,
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_frontport_device_name_unique",
+            ),
             models.UniqueConstraint(
                 fields=("rear_port", "rear_port_position"),
                 name="dcim_frontport_rear_port_position_unique",
@@ -1482,12 +1514,14 @@ class FrontPort(CableTermination, ModularComponentModel):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class RearPort(CableTermination, ModularComponentModel):
+class RearPort(CableTermination, ComponentModel):
     """
     A pass-through port on the rear of a Device or Module.
     """
 
     is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(max_length=50, choices=PortTypeChoices)
     positions = models.PositiveSmallIntegerField(
@@ -1497,6 +1531,15 @@ class RearPort(CableTermination, ModularComponentModel):
             MaxValueValidator(REARPORT_POSITIONS_MAX),
         ],
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_rearport_device_name_unique",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -1524,6 +1567,8 @@ class DeviceBay(ComponentModel):
     """
     An empty space within a Device which can house a child device
     """
+
+    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE)
 
     installed_device = models.OneToOneField(
         to="dcim.Device",
@@ -1582,6 +1627,8 @@ class InventoryItem(TreeModel, ComponentModel):
     An InventoryItem represents a serialized piece of hardware within a Device, such as a line card or power supply.
     InventoryItems are used only for inventory purposes.
     """
+
+    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE)
 
     manufacturer = models.ForeignKey(
         to="dcim.Manufacturer",

@@ -30,7 +30,7 @@ from nautobot.dcim.choices import (
     SubdeviceRoleChoices,
 )
 from nautobot.dcim.constants import MODULE_RECURSION_DEPTH_LIMIT
-from nautobot.dcim.querysets import DeviceQuerySet
+from nautobot.dcim.querysets import DeviceQuerySet, ModuleQuerySet
 from nautobot.dcim.utils import get_all_network_driver_mappings, get_network_driver_mapping_tool_names
 from nautobot.extras.models import ChangeLoggedModel, ConfigContextModel, RoleField, StatusField
 from nautobot.extras.utils import extras_features
@@ -1939,6 +1939,8 @@ class Module(PrimaryModel):
     )
     # TODO: add software support for Modules
 
+    objects = BaseManager.from_queryset(ModuleQuerySet)()
+
     clone_fields = [
         "module_type",
         "role",
@@ -2066,6 +2068,40 @@ class Module(PrimaryModel):
         # Render component names when this Module is first created or when the parent module bay has changed
         if is_new or parent_module_changed:
             self.render_component_names()
+
+    @property
+    def console_ports(self):
+        return ConsolePort.objects.filter(module=self)
+
+    @property
+    def console_server_ports(self):
+        return ConsoleServerPort.objects.filter(module=self)
+
+    @property
+    def power_ports(self):
+        return PowerPort.objects.filter(module=self)
+
+    @property
+    def power_outlets(self):
+        return PowerOutlet.objects.filter(module=self)
+
+    @property
+    def interfaces(self):
+        return Interface.objects.filter(module=self)
+
+    @property
+    def front_ports(self):
+        return FrontPort.objects.filter(module=self)
+
+    @property
+    def rear_ports(self):
+        return RearPort.objects.filter(module=self)
+
+    @property
+    def power_feeds(self):
+        from nautobot.dcim.models.power import PowerFeed
+
+        return PowerFeed.objects.filter(module=self)
 
     def create_components(self):
         """Create module components from the module type definition."""

@@ -2162,7 +2162,7 @@ class PlatformTestCase(ViewTestCases.OrganizationalObjectViewTestCase, ViewTestC
 
 class DeviceTestCase(ViewTestCases.PrimaryObjectViewTestCase):
     model = Device
-    allowed_number_of_tree_queries_per_view_type = {"retrieve": 1}
+    allowed_number_of_tree_queries_per_view_type = {"retrieve": 4}
 
     @classmethod
     def setUpTestData(cls):

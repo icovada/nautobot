@@ -43,10 +43,11 @@ from nautobot.extras.filter_mixins import CustomFieldModelFilterSetMixin, Relati
 
 class CableTerminationModelFilterSetMixin(django_filters.FilterSet):
     has_cable = RelatedMembershipBooleanFilter(
-        field_name="cable",
+        field_name="cable_ends__cable",
         label="Has cable",
     )
     cable = django_filters.ModelMultipleChoiceFilter(
+        field_name="cable_ends__cable",
         queryset=Cable.objects.all(),
         label="Cable",
     )
