@@ -164,11 +164,19 @@ class Cable(PrimaryModel):
         term = self.termination_a
         return term.pk if term is not None else None
 
+    @termination_a_id.setter
+    def termination_a_id(self, value):
+        self._pending_termination_a_id = value
+
     @property
     def termination_b_id(self):
         """Backwards-compatible access to the side B termination ID."""
         term = self.termination_b
         return term.pk if term is not None else None
+
+    @termination_b_id.setter
+    def termination_b_id(self, value):
+        self._pending_termination_b_id = value
 
     def clean(self):
         super().clean()

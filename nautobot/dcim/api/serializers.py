@@ -819,6 +819,8 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
     # TODO: termination_a_type/termination_b_type are a bit redundant with the full termination_a/termination_b dicts
     termination_a_type = ContentTypeField(queryset=ContentType.objects.filter(CABLE_TERMINATION_MODELS))
     termination_b_type = ContentTypeField(queryset=ContentType.objects.filter(CABLE_TERMINATION_MODELS))
+    termination_a_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    termination_b_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     termination_a = serializers.SerializerMethodField(read_only=True)
     termination_b = serializers.SerializerMethodField(read_only=True)
     length_unit = ChoiceField(choices=CableLengthUnitChoices, allow_blank=True, required=False)
@@ -830,6 +832,12 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
         extra_kwargs = {
             "color": {"help_text": "RGB color in hexadecimal (e.g. 00ff00)"},
         }
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["termination_a_id"] = instance.termination_a_id
+        data["termination_b_id"] = instance.termination_b_id
+        return data
 
     def _get_termination(self, obj, side):
         """
