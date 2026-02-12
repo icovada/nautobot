@@ -417,7 +417,7 @@ class CableTerminationTable(BaseTable):
 
 class PathEndpointTable(CableTerminationTable):
     connection = tables.TemplateColumn(
-        accessor="_path",
+        accessor="trace_to_remote",
         template_code=PATHENDPOINT,
         verbose_name="Connection",
         orderable=False,
