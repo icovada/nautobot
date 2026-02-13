@@ -402,10 +402,27 @@ class CableTermination(PolymorphicModel, PrimaryModel):
             # MySQL syntax
             cast_text = "CHAR"
             concat_op = "CONCAT({0}, ',', {1})"
+            raw_concat = "CONCAT({0}, {1})"
         else:
             # PostgreSQL syntax (default)
             cast_text = "TEXT"
             concat_op = "{0} || ',' || {1}"
+            raw_concat = "{0} || {1}"
+
+        # Helper to build LIKE pattern: '%,<id>,%' for cycle detection
+        def like_contains(id_expr):
+            """Check if comma-separated visited list contains id (as middle element)."""
+            return raw_concat.format(raw_concat.format("'%%,'", id_expr), "',%%'")
+
+        def like_startswith(id_expr):
+            """Check if comma-separated visited list starts with id."""
+            return raw_concat.format(id_expr, "',%%'")
+
+        def like_endswith(id_expr):
+            """Check if comma-separated visited list ends with id."""
+            return raw_concat.format("'%%,'", id_expr)
+
+        id_cast = f"CAST(next_paired.cable_termination_id AS {cast_text})"
 
         sql = f"""
         WITH RECURSIVE cable_trace AS (
@@ -444,9 +461,9 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                 AND next_paired.position = next_ce.position
                 AND next_paired.cable_side != next_ce.cable_side
             -- Cycle detection
-            WHERE ct.visited NOT LIKE {concat_op.format("'%%,'", f"CAST(next_paired.cable_termination_id AS {cast_text})")} || ',%%'
-                AND ct.visited NOT LIKE CAST(next_paired.cable_termination_id AS {cast_text}) || ',%%'
-                AND ct.visited NOT LIKE '%%,' || CAST(next_paired.cable_termination_id AS {cast_text})
+            WHERE ct.visited NOT LIKE {like_contains(id_cast)}
+                AND ct.visited NOT LIKE {like_startswith(id_cast)}
+                AND ct.visited NOT LIKE {like_endswith(id_cast)}
         )
         SELECT current_id FROM cable_trace
         ORDER BY depth DESC
@@ -506,11 +523,21 @@ class CableTermination(PolymorphicModel, PrimaryModel):
             cast_text = "CHAR"
             concat_op = "CONCAT({0}, ',', {1})"
             concat_3 = "CONCAT({0}, ',', {1}, ',', {2})"
+            raw_concat = "CONCAT({0}, {1})"
         else:
             # PostgreSQL syntax (default)
             cast_text = "TEXT"
             concat_op = "{0} || ',' || {1}"
             concat_3 = "{0} || ',' || {1} || ',' || {2}"
+            raw_concat = "{0} || {1}"
+
+        # Helper to build LIKE pattern: '%,<id>,%' for cycle detection
+        def like_contains(id_expr):
+            return raw_concat.format(raw_concat.format("'%%,'", id_expr), "',%%'")
+
+        # Wrap nodes in commas so LIKE '%,<id>,%' matches all positions
+        nodes_wrapped = concat_op.format("','", concat_op.format("ct.nodes", "','"))
+        id_cast = f"CAST(next_paired.cable_termination_id AS {cast_text})"
 
         # CTE now also tracks cable end IDs (pairs: from_ce, to_ce) and cable IDs
         sql = f"""
@@ -556,7 +583,7 @@ class CableTermination(PolymorphicModel, PrimaryModel):
                 AND next_paired.position = next_ce.position
                 AND next_paired.cable_side != next_ce.cable_side
             -- Cycle detection on final destination
-            WHERE {concat_op.format("','", concat_op.format("ct.nodes", "','"))} NOT LIKE {concat_op.format("'%%,'", f"CAST(next_paired.cable_termination_id AS {cast_text})")} || ',%%'
+            WHERE {nodes_wrapped} NOT LIKE {like_contains(id_cast)}
         )
         SELECT {concat_op.format("nodes", f"CAST(current_id AS {cast_text})")} AS full_path, cables, cable_ends
         FROM cable_trace
