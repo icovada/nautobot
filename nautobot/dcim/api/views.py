@@ -29,7 +29,6 @@ from nautobot.core.templatetags.helpers import bettertitle, validated_api_viewna
 from nautobot.dcim import filters
 from nautobot.dcim.models import (
     Cable,
-    CablePath,
     ConsolePort,
     ConsolePortTemplate,
     ConsoleServerPort,
@@ -129,17 +128,34 @@ class PathEndpointMixin:
 
 
 class PassThroughPortMixin:
-    @extend_schema(filters=False, responses={200: serializers.CablePathSerializer(many=True)})
+    @extend_schema(filters=False, responses={200: dict})
     @action(detail=True, url_path="paths")
     def paths(self, request, pk):
         """
-        Return all CablePaths which traverse a given pass-through port.
+        Return the cable path traced from this object.
+
+        CablePath has been removed - paths are now computed on-demand using trace_path().
         """
         obj = get_object_or_404(self.queryset, pk=pk)
-        cablepaths = CablePath.objects.filter(path__contains=obj).prefetch_related("origin", "destination")
-        serializer = serializers.CablePathSerializer(cablepaths, context={"request": request}, many=True)
 
-        return Response(serializer.data)
+        # If the object has trace_path method, use it
+        if hasattr(obj, "trace_path"):
+            try:
+                path_objects = obj.trace_path()
+                # Return simplified path information
+                path_data = [
+                    {
+                        "type": type(obj).__name__,
+                        "id": str(obj.pk),
+                        "display": str(obj),
+                    }
+                    for obj in path_objects
+                ]
+                return Response({"path": path_data})
+            except Exception as e:
+                return Response({"error": str(e), "path": []})
+
+        return Response({"path": []})
 
 
 #
@@ -587,31 +603,31 @@ class DeviceViewSet(ConfigContextQuerySetMixin, NautobotModelViewSet):
 
 
 class ConsolePortViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = ConsolePort.objects.prefetch_related("_path__destination", "_cable_peer")
+    queryset = ConsolePort.objects.prefetch_related("cable_ends__cable__cable_ends__cable_termination")
     serializer_class = serializers.ConsolePortSerializer
     filterset_class = filters.ConsolePortFilterSet
 
 
 class ConsoleServerPortViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = ConsoleServerPort.objects.prefetch_related("_path__destination", "_cable_peer")
+    queryset = ConsoleServerPort.objects.prefetch_related("cable_ends__cable__cable_ends__cable_termination")
     serializer_class = serializers.ConsoleServerPortSerializer
     filterset_class = filters.ConsoleServerPortFilterSet
 
 
 class PowerPortViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = PowerPort.objects.prefetch_related("_path__destination", "_cable_peer")
+    queryset = PowerPort.objects.prefetch_related("cable_ends__cable__cable_ends__cable_termination")
     serializer_class = serializers.PowerPortSerializer
     filterset_class = filters.PowerPortFilterSet
 
 
 class PowerOutletViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = PowerOutlet.objects.prefetch_related("_path__destination", "_cable_peer")
+    queryset = PowerOutlet.objects.prefetch_related("cable_ends__cable__cable_ends__cable_termination")
     serializer_class = serializers.PowerOutletSerializer
     filterset_class = filters.PowerOutletFilterSet
 
 
 class InterfaceViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = Interface.objects.prefetch_related("_path__destination", "_cable_peer").annotate(
+    queryset = Interface.objects.prefetch_related("cable_ends__cable__cable_ends__cable_termination").annotate(
         _ip_address_count=count_related(IPAddress, "interfaces")  # avoid conflict with Interface.ip_address_count()
     )
     serializer_class = serializers.InterfaceSerializer
@@ -657,23 +673,19 @@ class ModuleBayViewSet(NautobotModelViewSet):
 
 
 class ConsoleConnectionViewSet(ListModelMixin, GenericViewSet):
-    queryset = ConsolePort.objects.select_related("device", "_path").filter(_path__destination_id__isnull=False)
+    queryset = ConsolePort.objects.select_related("device").filter(cable_ends__isnull=False)
     serializer_class = serializers.ConsolePortSerializer
     filterset_class = filters.ConsoleConnectionFilterSet
 
 
 class PowerConnectionViewSet(ListModelMixin, GenericViewSet):
-    queryset = PowerPort.objects.select_related("device", "_path").filter(_path__destination_id__isnull=False)
+    queryset = PowerPort.objects.select_related("device").filter(cable_ends__isnull=False)
     serializer_class = serializers.PowerPortSerializer
     filterset_class = filters.PowerConnectionFilterSet
 
 
 class InterfaceConnectionViewSet(ListModelMixin, GenericViewSet):
-    queryset = Interface.objects.select_related("device", "_path").filter(
-        # Avoid duplicate connections by only selecting the lower PK in a connected pair
-        _path__destination_id__isnull=False,
-        pk__lt=F("_path__destination_id"),
-    )
+    queryset = Interface.objects.select_related("device").filter(cable_ends__isnull=False)
     serializer_class = serializers.InterfaceConnectionSerializer
     filterset_class = filters.InterfaceConnectionFilterSet
 
@@ -684,7 +696,7 @@ class InterfaceConnectionViewSet(ListModelMixin, GenericViewSet):
 
 
 class CableViewSet(NautobotModelViewSet):
-    queryset = Cable.objects.prefetch_related("termination_a", "termination_b")
+    queryset = Cable.objects.prefetch_related("cable_ends__cable_termination")
     serializer_class = serializers.CableSerializer
     filterset_class = filters.CableFilterSet
 
@@ -725,7 +737,7 @@ class PowerPanelViewSet(NautobotModelViewSet):
 
 
 class PowerFeedViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = PowerFeed.objects.prefetch_related("_cable_peer", "_path__destination")
+    queryset = PowerFeed.objects.prefetch_related("cable_ends__cable__cable_ends__cable_termination")
     serializer_class = serializers.PowerFeedSerializer
     filterset_class = filters.PowerFeedFilterSet
 

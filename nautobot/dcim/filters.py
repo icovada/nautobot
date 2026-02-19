@@ -1425,33 +1425,22 @@ class CableFilterSet(NautobotFilterSet, StatusModelFilterSetMixin):
     device_id = django_filters.ModelMultipleChoiceFilter(
         queryset=Device.objects.all(),
         method="filter_device_id",
-        field_name="_termination_a_device_id",
         label="Device (ID)",
     )
-    device = MultiValueCharFilter(method="filter_device", field_name="device__name", label="Device (name)")
-    rack_id = MultiValueUUIDFilter(method="filter_device", field_name="device__rack_id", label="Rack (ID)")
-    rack = MultiValueCharFilter(method="filter_device", field_name="device__rack__name", label="Rack (name)")
-    location_id = MultiValueUUIDFilter(method="filter_device", field_name="device__location_id", label="Location (ID)")
-    location = MultiValueCharFilter(
-        method="filter_device", field_name="device__location__name", label="Location (name)"
-    )
-    tenant_id = MultiValueUUIDFilter(method="filter_device", field_name="device__tenant_id", label="Tenant (ID)")
-    tenant = MultiValueCharFilter(method="filter_device", field_name="device__tenant__name", label="Tenant (name)")
-    termination_a_type = ContentTypeMultipleChoiceFilter(
-        choices=FeatureQuery("cable_terminations").get_choices,
-        conjoined=False,
-    )
-    termination_b_type = ContentTypeMultipleChoiceFilter(
-        choices=FeatureQuery("cable_terminations").get_choices,
-        conjoined=False,
-    )
+    device = MultiValueCharFilter(method="filter_device_name", label="Device (name)")
+    rack_id = MultiValueUUIDFilter(method="filter_rack_id", label="Rack (ID)")
+    rack = MultiValueCharFilter(method="filter_rack_name", label="Rack (name)")
+    location_id = MultiValueUUIDFilter(method="filter_location_id", label="Location (ID)")
+    location = MultiValueCharFilter(method="filter_location_name", label="Location (name)")
+    tenant_id = MultiValueUUIDFilter(method="filter_tenant_id", label="Tenant (ID)")
+    tenant = MultiValueCharFilter(method="filter_tenant_name", label="Tenant (name)")
     termination_type = ContentTypeMultipleChoiceFilter(
         choices=FeatureQuery("cable_terminations").get_choices,
         conjoined=False,
         distinct=True,
         lookup_expr="in",
         method="_termination_type",
-        label="Termination (either end) type",
+        label="Termination type",
     )
 
     class Meta:
@@ -1461,40 +1450,66 @@ class CableFilterSet(NautobotFilterSet, StatusModelFilterSetMixin):
             "label",
             "length",
             "length_unit",
-            "termination_a_id",
-            "termination_b_id",
             "tags",
         ]
 
-    def filter_device(self, queryset, name, value):
-        queryset = queryset.filter(
-            Q(**{f"_termination_a_{name}__in": value}) | Q(**{f"_termination_b_{name}__in": value})
-        )
-        return queryset
+    def _filter_by_component_field(self, queryset, field_lookup, value):
+        """Filter cables by querying component models for matching termination IDs."""
+        component_models = [ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet, Interface, FrontPort, RearPort]
+        termination_ids = set()
 
-    def generate_query_filter_device_id(self, value):
-        if not hasattr(value, "__iter__") or isinstance(value, str):
-            value = [value]
-        return Q(_termination_a_device_id__in=value) | Q(_termination_b_device_id__in=value)
+        for model in component_models:
+            matching = model.objects.filter(**{f"{field_lookup}__in": value}).values_list("pk", flat=True)
+            termination_ids.update(matching)
+
+            # Also try through module.device for modular components
+            if hasattr(model, "module"):
+                module_lookup = field_lookup.replace("device__", "module__device__", 1)
+                matching_module = model.objects.filter(
+                    **{f"{module_lookup}__in": value}
+                ).values_list("pk", flat=True)
+                termination_ids.update(matching_module)
+
+        return queryset.filter(cable_ends__cable_termination_id__in=list(termination_ids)).distinct()
 
     def filter_device_id(self, queryset, name, value):
         if not value:
             return queryset
-        params = self.generate_query_filter_device_id(value)
-        return queryset.filter(params)
+        return self._filter_by_component_field(queryset, "device__id", value)
 
-    def generate_query__termination_type(self, value):
-        a_type_q = Q()
-        b_type_q = Q()
-        for label in value:
-            app_label, model = label.split(".")
-            a_type_q |= Q(termination_a_type__app_label=app_label, termination_a_type__model=model)
-            b_type_q |= Q(termination_b_type__app_label=app_label, termination_b_type__model=model)
-        return a_type_q | b_type_q
+    def filter_device_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__name", value)
+
+    def filter_rack_id(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__rack__id", value)
+
+    def filter_rack_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__rack__name", value)
+
+    def filter_location_id(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__location__id", value)
+
+    def filter_location_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__location__name", value)
+
+    def filter_tenant_id(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__tenant__id", value)
+
+    def filter_tenant_name(self, queryset, name, value):
+        return self._filter_by_component_field(queryset, "device__tenant__name", value)
 
     @extend_schema_field({"type": "string"})
     def _termination_type(self, queryset, name, value):
-        return queryset.filter(self.generate_query__termination_type(value)).distinct()
+        """Filter cables by termination type through CableEnd."""
+        # Build Q objects for each content type
+        q_objects = Q()
+        for label in value:
+            app_label, model = label.split(".")
+            q_objects |= Q(
+                cable_ends__cable_termination__polymorphic_ctype__app_label=app_label,
+                cable_ends__cable_termination__polymorphic_ctype__model=model,
+            )
+        return queryset.filter(q_objects).distinct()
 
 
 class ConnectionFilterSetMixin:

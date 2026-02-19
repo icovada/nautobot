@@ -9,11 +9,13 @@ CABLETERMINATION = """
 """
 
 PATHENDPOINT = """
-{% if value.destination %}
-    <a href="{{ value.destination.parent.get_absolute_url }}">{{ value.destination.parent }}</a>
-    <i class="mdi mdi-chevron-right"></i>
-    <a href="{{ value.destination.get_absolute_url }}">{{ value.destination }}</a>
-    {% with traced_path=value.origin.trace %}
+{% if value %}
+    {% if value.parent %}
+        <a href="{{ value.parent.get_absolute_url }}">{{ value.parent }}</a>
+        <i class="mdi mdi-chevron-right"></i>
+    {% endif %}
+    <a href="{{ value.get_absolute_url }}">{{ value }}</a>
+    {% with traced_path=record.trace %}
         {% for near_end, cable, far_end in traced_path %}
             {% if near_end.circuit %}
                 <small>via
@@ -240,7 +242,7 @@ INTERFACE_BUTTONS = """
     </li>
 {% endif %}
 {% if record.cable %}
-    <li><a href="{% url 'dcim:interface_trace' pk=record.pk %}" class="dropdown-item text-primary"><span class="mdi mdi-transit-connection-variant" aria-hidden="true"></span><Trace/a></li>
+    <li><a href="{% url 'dcim:interface_trace' pk=record.pk %}" class="dropdown-item text-primary"><span class="mdi mdi-transit-connection-variant" aria-hidden="true"></span>Trace</a></li>
     {% include 'dcim/inc/cable_toggle_buttons.html' with cable=record.cable %}
 {% elif record.is_connectable and perms.dcim.add_cable %}
     <li><a class="dropdown-item disabled" aria-disabled="true"><span class="mdi mdi-transit-connection-variant" aria-hidden="true"></span>Trace</a></li>

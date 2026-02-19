@@ -1,5 +1,3 @@
-import contextlib
-
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from drf_spectacular.utils import extend_schema_field
@@ -53,7 +51,6 @@ from nautobot.dcim.choices import (
 from nautobot.dcim.constants import CABLE_TERMINATION_MODELS, RACK_ELEVATION_LEGEND_WIDTH_DEFAULT
 from nautobot.dcim.models import (
     Cable,
-    CablePath,
     CableTermination,
     ConsolePort,
     ConsolePortTemplate,
@@ -113,10 +110,21 @@ class CableTerminationModelSerializerMixin(serializers.ModelSerializer):
     cable_peer_type = serializers.SerializerMethodField(read_only=True)
     cable_peer = serializers.SerializerMethodField(read_only=True)
 
+    def to_representation(self, instance):
+        # Cache cable_peer lookup to avoid calling get_cable_peer() multiple times
+        instance._cached_cable_peer = instance.get_cable_peer()
+        return super().to_representation(instance)
+
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_cable_peer_type(self, obj):
-        if obj._cable_peer is not None:
-            return f"{obj._cable_peer._meta.app_label}.{obj._cable_peer._meta.model_name}"
+        # Use cached value if available, otherwise compute it
+        if hasattr(obj, "_cached_cable_peer"):
+            cable_peer = obj._cached_cable_peer
+        else:
+            cable_peer = obj.get_cable_peer()
+
+        if cable_peer is not None:
+            return f"{cable_peer._meta.app_label}.{cable_peer._meta.model_name}"
         return None
 
     @extend_schema_field(
@@ -131,9 +139,15 @@ class CableTerminationModelSerializerMixin(serializers.ModelSerializer):
         """
         Return the appropriate serializer for the cable termination model.
         """
-        if obj._cable_peer is not None:
+        # Use cached value if available, otherwise compute it
+        if hasattr(obj, "_cached_cable_peer"):
+            cable_peer = obj._cached_cable_peer
+        else:
+            cable_peer = obj.get_cable_peer()
+
+        if cable_peer is not None:
             depth = get_nested_serializer_depth(self)
-            return return_nested_serializer_data_based_on_depth(self, depth, obj, obj._cable_peer, "_cable_peer")
+            return return_nested_serializer_data_based_on_depth(self, depth, obj, cable_peer, "cable_peer")
         return None
 
 
@@ -144,9 +158,9 @@ class PathEndpointModelSerializerMixin(ValidatedModelSerializer):
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_connected_endpoint_type(self, obj):
-        with contextlib.suppress(CablePath.DoesNotExist):
-            if obj._path is not None and obj._path.destination is not None:
-                return f"{obj._path.destination._meta.app_label}.{obj._path.destination._meta.model_name}"
+        endpoint = obj.connected_endpoint
+        if endpoint is not None:
+            return f"{endpoint._meta.app_label}.{endpoint._meta.model_name}"
         return None
 
     @extend_schema_field(
@@ -161,20 +175,18 @@ class PathEndpointModelSerializerMixin(ValidatedModelSerializer):
         """
         Return the appropriate serializer for the type of connected object.
         """
-        with contextlib.suppress(CablePath.DoesNotExist):
-            if obj._path is not None and obj._path.destination is not None:
-                depth = get_nested_serializer_depth(self)
-                return return_nested_serializer_data_based_on_depth(
-                    self, depth, obj, obj._path.destination, "connected_endpoint"
-                )
+        endpoint = obj.connected_endpoint
+        if endpoint is not None:
+            depth = get_nested_serializer_depth(self)
+            return return_nested_serializer_data_based_on_depth(
+                self, depth, obj, endpoint, "connected_endpoint"
+            )
         return None
 
     @extend_schema_field(serializers.BooleanField(allow_null=True))
     def get_connected_endpoint_reachable(self, obj):
-        with contextlib.suppress(CablePath.DoesNotExist):
-            if obj._path is not None:
-                return obj._path.is_active
-        return None
+        # An endpoint is reachable if connected_endpoint returns a value
+        return obj.connected_endpoint is not None
 
 
 class ModularDeviceComponentTemplateSerializerMixin:
@@ -807,6 +819,8 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
     # TODO: termination_a_type/termination_b_type are a bit redundant with the full termination_a/termination_b dicts
     termination_a_type = ContentTypeField(queryset=ContentType.objects.filter(CABLE_TERMINATION_MODELS))
     termination_b_type = ContentTypeField(queryset=ContentType.objects.filter(CABLE_TERMINATION_MODELS))
+    termination_a_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    termination_b_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     termination_a = serializers.SerializerMethodField(read_only=True)
     termination_b = serializers.SerializerMethodField(read_only=True)
     length_unit = ChoiceField(choices=CableLengthUnitChoices, allow_blank=True, required=False)
@@ -819,6 +833,12 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
             "color": {"help_text": "RGB color in hexadecimal (e.g. 00ff00)"},
         }
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["termination_a_id"] = instance.termination_a_id
+        data["termination_b_id"] = instance.termination_b_id
+        return data
+
     def _get_termination(self, obj, side):
         """
         Serialize a nested representation of a termination.
@@ -826,6 +846,8 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
         if side.lower() not in ["a", "b"]:
             raise ValueError("Termination side must be either A or B.")
         termination = getattr(obj, f"termination_{side.lower()}")
+        if termination is None:
+            return None
         depth = get_nested_serializer_depth(self)
         return return_nested_serializer_data_based_on_depth(
             self, depth, obj, termination, f"termination_{side.lower()}"
@@ -851,6 +873,81 @@ class CableSerializer(TaggedModelSerializerMixin, NautobotModelSerializer):
     def get_termination_b(self, obj):
         return self._get_termination(obj, "b")
 
+    def create(self, validated_data):
+        """Create Cable and associated CableEnd records."""
+        from nautobot.dcim.models import CableEnd
+
+        # Extract termination data
+        termination_a_type = validated_data.pop("termination_a_type", None)
+        termination_a_id = validated_data.pop("termination_a_id", None)
+        termination_b_type = validated_data.pop("termination_b_type", None)
+        termination_b_id = validated_data.pop("termination_b_id", None)
+
+        # Create the Cable instance
+        cable = super().create(validated_data)
+
+        # Create CableEnd records for each termination
+        if termination_a_id and termination_a_type:
+            termination_a = termination_a_type.get_object_for_this_type(pk=termination_a_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_a,
+                cable_side="a",
+                position=0,
+            )
+
+        if termination_b_id and termination_b_type:
+            termination_b = termination_b_type.get_object_for_this_type(pk=termination_b_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_b,
+                cable_side="b",
+                position=0,
+            )
+
+        return cable
+
+    def update(self, instance, validated_data):
+        """Update Cable and associated CableEnd records."""
+        from nautobot.dcim.models import CableEnd
+
+        # Extract termination data
+        termination_a_type = validated_data.pop("termination_a_type", None)
+        termination_a_id = validated_data.pop("termination_a_id", None)
+        termination_b_type = validated_data.pop("termination_b_type", None)
+        termination_b_id = validated_data.pop("termination_b_id", None)
+
+        # Update the Cable instance
+        cable = super().update(instance, validated_data)
+
+        # Update CableEnd for side A if provided
+        if termination_a_id is not None and termination_a_type is not None:
+            # Remove existing CableEnd for side A
+            CableEnd.objects.filter(cable=cable, cable_side="a").delete()
+            # Create new CableEnd
+            termination_a = termination_a_type.get_object_for_this_type(pk=termination_a_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_a,
+                cable_side="a",
+                position=0,
+            )
+
+        # Update CableEnd for side B if provided
+        if termination_b_id is not None and termination_b_type is not None:
+            # Remove existing CableEnd for side B
+            CableEnd.objects.filter(cable=cable, cable_side="b").delete()
+            # Create new CableEnd
+            termination_b = termination_b_type.get_object_for_this_type(pk=termination_b_id)
+            CableEnd.objects.create(
+                cable=cable,
+                cable_termination=termination_b,
+                cable_side="b",
+                position=0,
+            )
+
+        return cable
+
 
 class TracedCableSerializer(serializers.ModelSerializer):
     """
@@ -860,65 +957,6 @@ class TracedCableSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cable
         fields = "__all__"
-
-
-class CablePathSerializer(serializers.ModelSerializer):
-    origin_type = ContentTypeField(read_only=True)
-    origin = serializers.SerializerMethodField(read_only=True)
-    destination_type = ContentTypeField(read_only=True)
-    destination = serializers.SerializerMethodField(read_only=True)
-    path = serializers.SerializerMethodField(read_only=True)
-
-    class Meta:
-        model = CablePath
-        fields = "__all__"
-
-    @extend_schema_field(
-        PolymorphicProxySerializer(
-            component_name="PathEndpoint",
-            resource_type_field_name="object_type",
-            serializers=lambda: nested_serializers_for_models(get_all_concrete_models(PathEndpoint)),
-        )
-    )
-    def get_origin(self, obj):
-        """
-        Return the appropriate serializer for the origin.
-        """
-        depth = get_nested_serializer_depth(self)
-        return return_nested_serializer_data_based_on_depth(self, depth, obj, obj.origin, "origin")
-
-    @extend_schema_field(
-        PolymorphicProxySerializer(
-            component_name="PathEndpoint",
-            resource_type_field_name="object_type",
-            serializers=lambda: nested_serializers_for_models(get_all_concrete_models(PathEndpoint)),
-            allow_null=True,
-        )
-    )
-    def get_destination(self, obj):
-        """
-        Return the appropriate serializer for the destination, if any.
-        """
-        if obj.destination_id is not None:
-            depth = get_nested_serializer_depth(self)
-            return return_nested_serializer_data_based_on_depth(self, depth, obj, obj.destination, "destination")
-        return None
-
-    @extend_schema_field(
-        PolymorphicProxySerializer(
-            component_name="CableTermination",
-            resource_type_field_name="object_type",
-            serializers=lambda: nested_serializers_for_models(get_all_concrete_models(CableTermination)),
-            many=True,
-        )
-    )
-    def get_path(self, obj):
-        ret = []
-        for node in obj.get_path():
-            serializer = get_serializer_for_model(node)
-            context = {"request": self.context["request"]}
-            ret.append(serializer(node, context=context).data)
-        return ret
 
 
 #
@@ -942,9 +980,8 @@ class InterfaceConnectionSerializer(ValidatedModelSerializer):
 
     @extend_schema_field(serializers.BooleanField(allow_null=True))
     def get_connected_endpoint_reachable(self, obj):
-        if obj._path is not None:
-            return obj._path.is_active
-        return None
+        # An endpoint is reachable if connected_endpoint returns a value
+        return obj.connected_endpoint is not None
 
 
 #

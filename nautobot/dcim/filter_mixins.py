@@ -43,10 +43,11 @@ from nautobot.extras.filter_mixins import CustomFieldModelFilterSetMixin, Relati
 
 class CableTerminationModelFilterSetMixin(django_filters.FilterSet):
     has_cable = RelatedMembershipBooleanFilter(
-        field_name="cable",
+        field_name="cable_ends__cable",
         label="Has cable",
     )
     cable = django_filters.ModelMultipleChoiceFilter(
+        field_name="cable_ends__cable",
         queryset=Cable.objects.all(),
         label="Cable",
     )
@@ -158,9 +159,9 @@ class PathEndpointModelFilterSetMixin(django_filters.FilterSet):
 
     def filter_connected(self, queryset, name, value):
         if value:
-            return queryset.filter(_path__is_active=True)
+            return queryset.filter(cable_ends__isnull=False)
         else:
-            return queryset.filter(Q(_path__isnull=True) | Q(_path__is_active=False))
+            return queryset.filter(cable_ends__isnull=True)
 
 
 class DeviceModuleCommonFiltersMixin(django_filters.FilterSet):

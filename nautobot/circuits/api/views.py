@@ -45,7 +45,7 @@ class CircuitViewSet(NautobotModelViewSet):
 
 
 class CircuitTerminationViewSet(PathEndpointMixin, NautobotModelViewSet):
-    queryset = CircuitTermination.objects.prefetch_related("_path__destination")
+    queryset = CircuitTermination.objects.all()
     serializer_class = serializers.CircuitTerminationSerializer
     filterset_class = filters.CircuitTerminationFilterSet
 

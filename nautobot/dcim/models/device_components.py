@@ -1,7 +1,7 @@
 from decimal import Decimal
 import re
+import uuid
 
-from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -9,12 +9,17 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Sum
 from django.utils.functional import classproperty
+from polymorphic.managers import PolymorphicManager
+from polymorphic.models import PolymorphicModel
+from polymorphic.query import PolymorphicQuerySet
 
 from nautobot.core.constants import CHARFIELD_MAX_LENGTH
 from nautobot.core.models.fields import ForeignKeyWithAutoRelatedName, MACAddressCharField, NaturalOrderingField
 from nautobot.core.models.generics import BaseModel, PrimaryModel
+from nautobot.core.models.managers import BaseManager
 from nautobot.core.models.ordering import naturalize_interface
 from nautobot.core.models.query_functions import CollateAsChar
+from nautobot.core.models.querysets import RestrictedQuerySet
 from nautobot.core.models.tree_queries import TreeModel
 from nautobot.core.utils.cache import construct_cache_key
 from nautobot.core.utils.data import UtilizationData
@@ -74,7 +79,7 @@ class ComponentModel(PrimaryModel):
     An abstract model inherited by any model which has a parent Device.
     """
 
-    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE)
+    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE, blank=True, null=True)
     name = models.CharField(max_length=CHARFIELD_MAX_LENGTH, db_index=True)
     _name = NaturalOrderingField(target_field="name", max_length=CHARFIELD_MAX_LENGTH, blank=True, db_index=True)
     label = models.CharField(max_length=CHARFIELD_MAX_LENGTH, blank=True, help_text="Physical label")
@@ -111,13 +116,103 @@ class ComponentModel(PrimaryModel):
         return self.device
 
 
-class ModularComponentModel(ComponentModel):
-    device = ForeignKeyWithAutoRelatedName(
-        to="dcim.Device",
-        on_delete=models.CASCADE,
-        blank=True,
-        null=True,
-    )
+
+
+class RestrictedPolymorphicQuerySet(RestrictedQuerySet, PolymorphicQuerySet):
+    """QuerySet that combines Nautobot's RestrictedQuerySet with django-polymorphic's PolymorphicQuerySet."""
+
+    @staticmethod
+    def _translate_cable_field(field_name):
+        """Translate a single cable-related field name for backwards compatibility."""
+        if field_name.startswith("-"):
+            prefix = "-"
+            name = field_name[1:]
+        else:
+            prefix = ""
+            name = field_name
+        if name == "cable":
+            return prefix + "cable_ends__cable"
+        if name == "cable__isnull":
+            return prefix + "cable_ends__isnull"
+        if name.startswith("cable__") and not name.startswith("cable_ends__"):
+            return prefix + "cable_ends__" + name
+        return field_name
+
+    def _translate_cable_lookups(self, kwargs):
+        """Translate cable-related keyword lookups to work with the new CableEnd model."""
+        translated = {}
+        for key, value in kwargs.items():
+            translated[self._translate_cable_field(key)] = value
+        return translated
+
+    def _translate_cable_fields(self, fields):
+        """Translate cable-related positional field names to work with the new CableEnd model."""
+        return tuple(self._translate_cable_field(f) for f in fields)
+
+    def filter(self, *args, **kwargs):
+        """Override filter to translate cable-related lookups."""
+        kwargs = self._translate_cable_lookups(kwargs)
+        return super().filter(*args, **kwargs)
+
+    def exclude(self, *args, **kwargs):
+        """Override exclude to translate cable-related lookups."""
+        kwargs = self._translate_cable_lookups(kwargs)
+        return super().exclude(*args, **kwargs)
+
+    def _values(self, *fields, **expressions):
+        """Override _values to translate cable-related field names."""
+        fields = self._translate_cable_fields(fields)
+        expressions = self._translate_cable_lookups(expressions)
+        return super()._values(*fields, **expressions)
+
+    def order_by(self, *field_names):
+        """Override order_by to translate cable-related field names."""
+        field_names = self._translate_cable_fields(field_names)
+        return super().order_by(*field_names)
+
+    def _translate_cable_expression(self, expr):
+        """Recursively translate cable field references inside ORM expressions (Count, F, etc.)."""
+        from django.db.models import F
+        from django.db.models.expressions import BaseExpression
+
+        if isinstance(expr, F):
+            translated = self._translate_cable_field(expr.name)
+            if translated != expr.name:
+                return F(translated)
+            return expr
+        if isinstance(expr, BaseExpression) and hasattr(expr, "source_expressions"):
+            new_sources = [self._translate_cable_expression(e) for e in expr.source_expressions]
+            if new_sources != expr.source_expressions:
+                expr = expr.copy()
+                expr.source_expressions = new_sources
+        return expr
+
+    def annotate(self, *args, **kwargs):
+        """Override annotate to translate cable-related field references in expressions."""
+        args = tuple(self._translate_cable_expression(a) for a in args)
+        kwargs = {k: self._translate_cable_expression(v) for k, v in kwargs.items()}
+        return super().annotate(*args, **kwargs)
+
+
+class PolymorphicBaseManager(PolymorphicManager, BaseManager):
+    """
+    Custom manager that combines PolymorphicManager with Nautobot's BaseManager.
+    This provides both polymorphic functionality and Nautobot's custom methods like restrict().
+    """
+
+    pass
+
+
+class CableTermination(PolymorphicModel, PrimaryModel):
+    """
+    A concrete polymorphic model inherited by all models to which a Cable can terminate (certain device components, PowerFeed, and
+    CircuitTermination instances).
+
+    Connections are made through the CableEnd junction table, which allows multiple terminations per cable side.
+    The `cable` property returns the Cable connected to this termination via CableEnd.
+    Use `get_cable_peer()` to get the immediate peer on the opposite side of the cable.
+    """
+
     module = ForeignKeyWithAutoRelatedName(
         to="dcim.Module",
         on_delete=models.CASCADE,
@@ -125,26 +220,22 @@ class ModularComponentModel(ComponentModel):
         null=True,
     )
 
-    natural_key_field_names = ["device", "module", "name"]
+    # Use custom manager that combines PolymorphicManager with BaseManager
+    objects = PolymorphicBaseManager.from_queryset(RestrictedPolymorphicQuerySet)()
+
+    is_metadata_associable_model = False
 
     class Meta:
-        abstract = True
-        ordering = ("device", "module__id", "_name")  # Module.ordering is complex/expensive so don't order by module
-        constraints = [
-            models.UniqueConstraint(
-                fields=("device", "name"),
-                name="%(app_label)s_%(class)s_device_name_unique",
-            ),
-            models.UniqueConstraint(
-                fields=("module", "name"),
-                name="%(app_label)s_%(class)s_module_name_unique",
-            ),
-        ]
+        # No longer abstract - this is now a concrete table
+        pass
 
     @property
     def parent(self):
         """Device that this component belongs to, walking up module inheritance if necessary."""
-        return self.module.device if self.module else self.device  # pylint: disable=no-member
+        device = getattr(self, "device", None)
+        if self.module:
+            return self.module.device  # pylint: disable=no-member
+        return device
 
     def render_name_template(self, save=False):
         """
@@ -156,18 +247,9 @@ class ModularComponentModel(ComponentModel):
 
         If a module bay position is blank, it will be skipped and the parents will be checked until a non-blank
         position is found. If all parent module bays are exhausted, the variable is left as-is.
-
-        Example:
-            - Device (name="Device 1")
-              - ModuleBay (position="A")
-                - Module
-                  - ModuleBay (position="")
-                    - Module
-                      - Interface (name="{module}{module.parent}")
-
-            The deeply nested interface would be named "A{module.parent}" after calling this method.
         """
-        if self.module and self.module.parent_module_bay and "{module" in self.name:  # pylint: disable=no-member
+        name_field = getattr(self, "name", None)
+        if self.module and self.module.parent_module_bay and name_field and "{module" in name_field:  # pylint: disable=no-member
             name = ""
             module_bay = self.module.parent_module_bay  # pylint: disable=no-member
             positions = []
@@ -176,7 +258,7 @@ class ModularComponentModel(ComponentModel):
                 if position:
                     positions.append(position)
                 module_bay = getattr(getattr(module_bay, "parent_module", None), "parent_module_bay", None)
-            for part in re.split(r"({module(?:\.parent)*})", self.name):
+            for part in re.split(r"({module(?:\.parent)*})", name_field):
                 if re.fullmatch(r"{module(\.parent)*}", part):
                     depth = part.count(".parent")
                     if depth < len(positions):
@@ -199,7 +281,8 @@ class ModularComponentModel(ComponentModel):
 
         # Annotate the parent
         try:
-            parent = self.device if self.device else self.module
+            device = getattr(self, "device", None)
+            parent = device if device else self.module
         except ObjectDoesNotExist:
             # The parent may have already been deleted
             parent = None
@@ -209,115 +292,444 @@ class ModularComponentModel(ComponentModel):
     def clean(self):
         super().clean()
 
-        # Validate that a Device or Module is set, but not both
-        if self.device and self.module:
+        # Validate that a Device or Module is set, but not both (only for models that have a device field)
+        device = getattr(self, "device", None)
+        if device and self.module:
             raise ValidationError("Only one of device or module must be set")
 
-        if not (self.device or self.module):
-            raise ValidationError("Either device or module must be set")
-
-
-class CableTermination(models.Model):
-    """
-    An abstract model inherited by all models to which a Cable can terminate (certain device components, PowerFeed, and
-    CircuitTermination instances). The `cable` field indicates the Cable instance which is terminated to this instance.
-
-    `_cable_peer` is a GenericForeignKey used to cache the far-end CableTermination on the local instance; this is a
-    shortcut to referencing `cable.termination_b`, for example. `_cable_peer` is set or cleared by the receivers in
-    dcim.signals when a Cable instance is created or deleted, respectively.
-    """
-
-    cable = models.ForeignKey(
-        to="dcim.Cable",
-        on_delete=models.SET_NULL,
-        related_name="+",
-        blank=True,
-        null=True,
-    )
-    _cable_peer_type = models.ForeignKey(
-        to=ContentType,
-        on_delete=models.SET_NULL,
-        related_name="+",
-        blank=True,
-        null=True,
-    )
-    _cable_peer_id = models.UUIDField(blank=True, null=True)
-    _cable_peer = GenericForeignKey(ct_field="_cable_peer_type", fk_field="_cable_peer_id")
-
-    # Generic relations to Cable. These ensure that an attached Cable is deleted if the terminated object is deleted.
-    _cabled_as_a = GenericRelation(
-        to="dcim.Cable",
-        content_type_field="termination_a_type",
-        object_id_field="termination_a_id",
-    )
-    _cabled_as_b = GenericRelation(
-        to="dcim.Cable",
-        content_type_field="termination_b_type",
-        object_id_field="termination_b_id",
-    )
-
-    class Meta:
-        abstract = True
-
-    def get_cable_peer(self):
-        return self._cable_peer
+        # TODO: re-enable
+        # # Only enforce "at least one required" for models that have a device field (i.e., ComponentModel subclasses)
+        # if hasattr(self, "device") and hasattr(type(self), "device"):
+        #     if not (device or self.module):
+        #         raise ValidationError("Either device or module must be set")
 
     @property
-    def parent(self):
+    def cable(self):
         """
-        Convenience property - used in template rendering among other cases.
+        Return the Cable connected to this termination via CableEnd.
 
-        Could be a Device, a Circuit, a PowerPanel, etc.
+        This property efficiently uses prefetched data when available (via prefetch_related("cable_ends__cable"))
+        to avoid N+1 query problems.
         """
-        raise NotImplementedError("Class didn't implement 'parent' property")
+        # Cannot access reverse relationships without a PK
+        if not self.pk:
+            return None
+        # Iterate to use prefetched data - Django recognizes this pattern
+        for cable_end in self.cable_ends.all():
+            return cable_end.cable
+        return None
+
+    @property
+    def cable_peer(self):
+        """
+        Return the cable peer termination (convenience property for table rendering).
+        Delegates to get_cable_peer().
+        """
+        return self.get_cable_peer()
+
+    @property
+    def _cable_peer(self):
+        """Backwards-compatible alias for cable_peer."""
+        return self.get_cable_peer()
+
+    def get_cable_peer(self):
+        """
+        Return the termination on the opposite end of the cable.
+        Uses on-the-fly tracing to find the immediate peer (same cable, opposite side).
+
+        This method efficiently uses prefetched data when available to avoid N+1 queries.
+        When cable data is prefetched properly, Django automatically uses the cached data.
+        """
+        # Cannot access reverse relationships without a PK
+        if not self.pk:
+            return None
+
+        cable = self.cable
+        if not cable:
+            return None
+
+        # Get our CableEnd - iterate to use prefetched data
+        our_cable_end = None
+        for ce in self.cable_ends.all():
+            our_cable_end = ce
+            break
+
+        if not our_cable_end:
+            return None
+
+        # Find the peer CableEnd - Django will use prefetched cable.cable_ends if available
+        for cable_end in cable.cable_ends.all():
+            if (cable_end.position == our_cable_end.position and
+                cable_end.cable_side != our_cable_end.cable_side):
+                peer_termination = cable_end.cable_termination
+
+                # Ensure we return the polymorphic subclass, not the base CableTermination
+                if peer_termination and type(peer_termination) is CableTermination:
+                    if hasattr(peer_termination, 'polymorphic_ctype'):
+                        model_class = peer_termination.polymorphic_ctype.model_class()
+                        if model_class and model_class != CableTermination:
+                            peer_termination = model_class.objects.get(pk=peer_termination.pk)
+
+                return peer_termination
+
+        return None
+
+    def trace_to_remote(self):
+        """
+        Trace the cable path from this CableTermination through any intermediate
+        FrontPort/RearPort passthroughs to find the remote endpoint.
+
+        Uses a recursive CTE for efficient database-level recursion.
+        CableEnds are paired by (cable, position, opposite side).
+
+        Supports both PostgreSQL and MySQL 8.0+.
+
+        Returns:
+            CableTermination or None: The endpoint at the remote end of the cable path.
+        """
+        # Cannot trace without a PK
+        if not self.pk:
+            return None
+
+        from django.db import connection
+
+        ce_table = "dcim_cableend"  # CableEnd table
+        fp_table = "dcim_frontport"  # FrontPort table
+
+        # Database-specific SQL syntax
+        is_mysql = connection.vendor == 'mysql'
+        if is_mysql:
+            # MySQL syntax
+            cast_text = "CHAR"
+            concat_op = "CONCAT({0}, ',', {1})"
+            raw_concat = "CONCAT({0}, {1})"
+        else:
+            # PostgreSQL syntax (default)
+            cast_text = "TEXT"
+            concat_op = "{0} || ',' || {1}"
+            raw_concat = "{0} || {1}"
+
+        # Helper to build LIKE pattern: '%,<id>,%' for cycle detection
+        def like_contains(id_expr):
+            """Check if comma-separated visited list contains id (as middle element)."""
+            return raw_concat.format(raw_concat.format("'%%,'", id_expr), "',%%'")
+
+        def like_startswith(id_expr):
+            """Check if comma-separated visited list starts with id."""
+            return raw_concat.format(id_expr, "',%%'")
+
+        def like_endswith(id_expr):
+            """Check if comma-separated visited list ends with id."""
+            return raw_concat.format("'%%,'", id_expr)
+
+        id_cast = f"CAST(next_paired.cable_termination_id AS {cast_text})"
+
+        sql = f"""
+        WITH RECURSIVE cable_trace AS (
+            -- Base case: cross the first cable from this endpoint
+            SELECT
+                paired_ce.cable_termination_id AS current_id,
+                1 AS depth,
+                {concat_op.format(f"CAST(%(start_id)s AS {cast_text})", f"CAST(paired_ce.cable_termination_id AS {cast_text})")} AS visited
+            FROM {ce_table} AS start_ce
+            INNER JOIN {ce_table} AS paired_ce
+                ON paired_ce.cable_id = start_ce.cable_id
+                AND paired_ce.position = start_ce.position
+                AND paired_ce.cable_side != start_ce.cable_side
+            WHERE start_ce.cable_termination_id = %(start_id)s
+
+            UNION ALL
+
+            -- Recursive: passthrough (FrontPort<->RearPort) then cross next cable
+            SELECT
+                next_paired.cable_termination_id,
+                ct.depth + 1,
+                {concat_op.format("ct.visited", f"CAST(next_paired.cable_termination_id AS {cast_text})")}
+            FROM cable_trace AS ct
+            -- FrontPort -> RearPort passthrough
+            LEFT JOIN {fp_table} AS fp
+                ON fp.cabletermination_ptr_id = ct.current_id
+            -- RearPort -> FrontPort passthrough (reverse lookup)
+            LEFT JOIN {fp_table} AS fp_rev
+                ON fp_rev.rear_port_id = ct.current_id
+            -- Find cable end on the passthrough destination
+            INNER JOIN {ce_table} AS next_ce
+                ON next_ce.cable_termination_id = COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id)
+            -- Get paired cable end across that cable
+            INNER JOIN {ce_table} AS next_paired
+                ON next_paired.cable_id = next_ce.cable_id
+                AND next_paired.position = next_ce.position
+                AND next_paired.cable_side != next_ce.cable_side
+            -- Cycle detection
+            WHERE ct.visited NOT LIKE {like_contains(id_cast)}
+                AND ct.visited NOT LIKE {like_startswith(id_cast)}
+                AND ct.visited NOT LIKE {like_endswith(id_cast)}
+        )
+        SELECT current_id FROM cable_trace
+        ORDER BY depth DESC
+        LIMIT 1
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, {"start_id": str(self.pk)})
+            row = cursor.fetchone()
+
+        if row:
+            node_id = row[0]
+            # Polymorphic query returns the actual subclass instance
+            try:
+                instance = CableTermination.objects.get(pk=node_id)
+                # If we got the base class instead of the subclass, fetch it explicitly
+                if type(instance) is CableTermination and hasattr(instance, 'polymorphic_ctype'):
+                    # Get the actual model class from the content type
+                    model_class = instance.polymorphic_ctype.model_class()
+                    if model_class and model_class != CableTermination:
+                        return model_class.objects.get(pk=node_id)
+                return instance
+            except CableTermination.DoesNotExist:
+                return None
+        return None
+
+    def trace_path(self):
+        """
+        Trace the full cable path from this CableTermination, returning all intermediate
+        objects in order including CableEnds.
+
+        Uses a recursive CTE for efficient database-level recursion.
+        CableEnds are paired by (cable, position, opposite side).
+
+        Supports both PostgreSQL and MySQL 8.0+.
+
+        Returns:
+            list: Ordered list of objects [CableTermination, CableEnd, Cable,
+                  CableEnd, CableTermination, CableTermination, CableEnd, Cable,
+                  CableEnd, CableTermination] or empty list if no path exists.
+        """
+        # Cannot trace without a PK
+        if not self.pk:
+            return []
+
+        from django.db import connection
+
+        from nautobot.dcim.models.cables import Cable, CableEnd
+
+        ce_table = "dcim_cableend"
+        fp_table = "dcim_frontport"
+
+        # Database-specific SQL syntax
+        is_mysql = connection.vendor == 'mysql'
+        if is_mysql:
+            # MySQL syntax
+            cast_text = "CHAR"
+            concat_op = "CONCAT({0}, ',', {1})"
+            concat_3 = "CONCAT({0}, ',', {1}, ',', {2})"
+            raw_concat = "CONCAT({0}, {1})"
+        else:
+            # PostgreSQL syntax (default)
+            cast_text = "TEXT"
+            concat_op = "{0} || ',' || {1}"
+            concat_3 = "{0} || ',' || {1} || ',' || {2}"
+            raw_concat = "{0} || {1}"
+
+        # Helper to build LIKE pattern: '%,<id>,%' for cycle detection
+        def like_contains(id_expr):
+            return raw_concat.format(raw_concat.format("'%%,'", id_expr), "',%%'")
+
+        # Wrap nodes in commas so LIKE '%,<id>,%' matches all positions
+        nodes_wrapped = concat_op.format("','", concat_op.format("ct.nodes", "','"))
+        id_cast = f"CAST(next_paired.cable_termination_id AS {cast_text})"
+
+        # CTE now also tracks cable end IDs (pairs: from_ce, to_ce) and cable IDs
+        sql = f"""
+        WITH RECURSIVE cable_trace AS (
+            -- Base case: cross the first cable from this endpoint
+            SELECT
+                paired_ce.cable_termination_id AS current_id,
+                start_ce.cable_id AS cable_id,
+                1 AS depth,
+                CAST(%(start_id)s AS {cast_text}) AS nodes,
+                CAST(start_ce.cable_id AS {cast_text}) AS cables,
+                {concat_op.format(f"CAST(start_ce.id AS {cast_text})", f"CAST(paired_ce.id AS {cast_text})")} AS cable_ends
+            FROM {ce_table} AS start_ce
+            INNER JOIN {ce_table} AS paired_ce
+                ON paired_ce.cable_id = start_ce.cable_id
+                AND paired_ce.position = start_ce.position
+                AND paired_ce.cable_side != start_ce.cable_side
+            WHERE start_ce.cable_termination_id = %(start_id)s
+
+            UNION ALL
+
+            -- Recursive: passthrough (FrontPort<->RearPort) then cross next cable
+            SELECT
+                next_paired.cable_termination_id,
+                next_ce.cable_id,
+                ct.depth + 1,
+                {concat_3.format("ct.nodes", f"CAST(ct.current_id AS {cast_text})", f"CAST(COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id) AS {cast_text})")},
+                {concat_op.format("ct.cables", f"CAST(next_ce.cable_id AS {cast_text})")},
+                {concat_3.format("ct.cable_ends", f"CAST(next_ce.id AS {cast_text})", f"CAST(next_paired.id AS {cast_text})")}
+            FROM cable_trace AS ct
+            -- FrontPort -> RearPort passthrough
+            LEFT JOIN {fp_table} AS fp
+                ON fp.cabletermination_ptr_id = ct.current_id
+            -- RearPort -> FrontPort passthrough (reverse lookup)
+            LEFT JOIN {fp_table} AS fp_rev
+                ON fp_rev.rear_port_id = ct.current_id
+            -- Find cable end on the passthrough destination
+            INNER JOIN {ce_table} AS next_ce
+                ON next_ce.cable_termination_id = COALESCE(fp.rear_port_id, fp_rev.cabletermination_ptr_id)
+            -- Get paired cable end across that cable
+            INNER JOIN {ce_table} AS next_paired
+                ON next_paired.cable_id = next_ce.cable_id
+                AND next_paired.position = next_ce.position
+                AND next_paired.cable_side != next_ce.cable_side
+            -- Cycle detection on final destination
+            WHERE {nodes_wrapped} NOT LIKE {like_contains(id_cast)}
+        )
+        SELECT {concat_op.format("nodes", f"CAST(current_id AS {cast_text})")} AS full_path, cables, cable_ends
+        FROM cable_trace
+        ORDER BY depth DESC
+        LIMIT 1
+        """
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, {"start_id": str(self.pk)})
+            row = cursor.fetchone()
+
+        if not row:
+            return []
+
+        node_ids = [uuid.UUID(x) for x in row[0].split(",")]
+        cable_ids = [uuid.UUID(x) for x in row[1].split(",")]
+        cable_end_ids = [uuid.UUID(x) for x in row[2].split(",")]
+
+        # Fetch all objects in bulk - ensure we get actual subclasses
+        nodes_by_id = {}
+        for obj in CableTermination.objects.filter(pk__in=node_ids):
+            # If we got the base class, fetch the actual subclass
+            if type(obj) is CableTermination and hasattr(obj, 'polymorphic_ctype'):
+                model_class = obj.polymorphic_ctype.model_class()
+                if model_class and model_class != CableTermination:
+                    obj = model_class.objects.get(pk=obj.pk)
+            nodes_by_id[obj.pk] = obj
+        cables_by_id = {obj.pk: obj for obj in Cable.objects.filter(pk__in=cable_ids)}
+        cable_ends_by_id = {
+            obj.pk: obj
+            for obj in CableEnd.objects.select_related("cable").filter(pk__in=cable_end_ids)
+        }
+
+        # Build ordered path: node, CableEnd, cable, CableEnd, node, node, CableEnd, cable, CableEnd, node
+        # CableEnds come in pairs (from_ce, to_ce) for each cable crossing
+        result = []
+        ce_idx = 0
+        for i, node_id in enumerate(node_ids):
+            result.append(nodes_by_id[node_id])
+
+            # Check if there's a cable crossing after this node
+            if ce_idx < len(cable_end_ids):
+                curr_node = nodes_by_id.get(node_id)
+                next_node = nodes_by_id.get(node_ids[i + 1]) if i + 1 < len(node_ids) else None
+
+                # Check if nodes are on different devices (indicating cable crossing)
+                curr_device = getattr(curr_node, "device_id", None) if hasattr(curr_node, "device_id") else None
+                next_device = getattr(next_node, "device_id", None) if hasattr(next_node, "device_id") else None
+
+                # Cable crossing happens when devices differ or one is a CircuitTermination
+                if curr_node and next_node and (curr_device != next_device or curr_device is None or next_device is None):
+                    from_ce_id = cable_end_ids[ce_idx]
+                    to_ce_id = cable_end_ids[ce_idx + 1]
+                    cable_id = cable_ids[ce_idx // 2]
+
+                    result.append(cable_ends_by_id[from_ce_id])
+                    result.append(cables_by_id[cable_id])
+                    result.append(cable_ends_by_id[to_ce_id])
+                    ce_idx += 2
+
+        return result
+
+    def get_absolute_url(self, api=False):
+        """
+        Return the absolute URL for this CableTermination.
+        Since CableTermination is polymorphic, delegate to the actual subclass instance.
+        """
+        # If this is already the polymorphic subclass, call parent's get_absolute_url
+        if type(self) is not CableTermination:
+            return super().get_absolute_url(api=api)
+
+        # If this is the base CableTermination class, we shouldn't have a direct URL
+        # This can happen if the polymorphic type is not loaded correctly
+        # Raise an error to help debug the issue
+        raise AttributeError(
+            f"CableTermination base class does not have a URL. "
+            f"Ensure queries use the polymorphic manager to get the correct subclass. "
+            f"Instance: {self} (pk={self.pk}, polymorphic_ctype={self.polymorphic_ctype})"
+        )
 
 
 class PathEndpoint(models.Model):
     """
-    An abstract model inherited by any CableTermination subclass which represents the end of a CablePath; specifically,
+    An abstract model inherited by any CableTermination subclass which represents the end of a cable path; specifically,
     these include ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet, Interface, PowerFeed, and CircuitTermination.
 
-    `_path` references the CablePath originating from this instance, if any. It is set or cleared by the receivers in
-    dcim.signals in response to changes in the cable path, and complements the `origin` GenericForeignKey field on the
-    CablePath model. `_path` should not be accessed directly; rather, use the `path` property.
-
-    `connected_endpoint()` is a convenience method for returning the destination of the associated CablePath, if any.
+    `connected_endpoint` is a convenience property for returning the remote end of the cable path, if any.
+    `path` is a convenience property for returning the full traced cable path, if any.
     """
-
-    _path = ForeignKeyWithAutoRelatedName(
-        to="dcim.CablePath",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
 
     class Meta:
         abstract = True
 
     def trace(self):
-        if self._path is None:
+        """
+        Return the cable path as a list of three-tuples (A termination, cable, B termination).
+        Uses on-the-fly tracing via trace_path() method from CableTermination.
+        """
+        from nautobot.dcim.models.cables import Cable, CableEnd
+
+        path_objects = self.trace_path()
+        if not path_objects:
             return []
 
-        # Construct the complete path
-        path = [self, *self._path.get_path()]  # pylint: disable=no-member
-        while (len(path) + 1) % 3:
-            # Pad to ensure we have complete three-tuples (e.g. for paths that end at a RearPort)
-            path.append(None)
-        path.append(self._path.destination)  # pylint: disable=no-member
+        # Filter out CableEnd objects to get just [node, cable, node, ...]
+        # CableEnd objects are junction records, not part of the rendered path
+        filtered = [obj for obj in path_objects if not isinstance(obj, CableEnd)]
 
-        # Return the path as a list of three-tuples (A termination, cable, B termination)
-        return list(zip(*[iter(path)] * 3))
+        if not filtered:
+            return []
+
+        # Group into three-tuples (near_end, cable, far_end)
+        # Handle both cable crossings (node-cable-node) and passthroughs (node-node)
+        result = []
+        i = 0
+        while i < len(filtered):
+            near_end = filtered[i]
+
+            # Check if next item is a Cable
+            if i + 1 < len(filtered) and isinstance(filtered[i + 1], Cable):
+                cable = filtered[i + 1]
+                far_end = filtered[i + 2] if i + 2 < len(filtered) else None
+                result.append((near_end, cable, far_end))
+                i += 3  # Skip cable and move past far_end
+            else:
+                # Passthrough (two consecutive nodes with no cable, e.g., FrontPort -> RearPort)
+                far_end = filtered[i + 1] if i + 1 < len(filtered) else None
+                result.append((near_end, None, far_end))
+                i += 2  # Move past far_end
+
+        return result
 
     @property
     def path(self):
-        return self._path
+        """
+        Return the full traced cable path as a list of objects.
+        """
+        return self.trace_path()
 
     @property
     def connected_endpoint(self):
         """
-        Return the attached CablePath's destination (if any)
+        Return the remote end of the cable path (if any).
+        Uses on-the-fly tracing via trace_to_remote() method from CableTermination.
         """
-        return self._path.destination if self._path else None  # pylint: disable=no-member
+        return self.trace_to_remote()
 
 
 #
@@ -333,10 +745,14 @@ class PathEndpoint(models.Model):
     "graphql",
     "webhooks",
 )
-class ConsolePort(ModularComponentModel, CableTermination, PathEndpoint):
+class ConsolePort(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical console port within a Device or Module. ConsolePorts connect to ConsoleServerPorts.
     """
+
+    is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -344,6 +760,15 @@ class ConsolePort(ModularComponentModel, CableTermination, PathEndpoint):
         blank=True,
         help_text="Physical port type",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_consoleport_device_name_unique",
+            ),
+        ]
 
 
 #
@@ -352,10 +777,14 @@ class ConsolePort(ModularComponentModel, CableTermination, PathEndpoint):
 
 
 @extras_features("custom_links", "cable_terminations", "custom_validators", "graphql", "webhooks")
-class ConsoleServerPort(ModularComponentModel, CableTermination, PathEndpoint):
+class ConsoleServerPort(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical port within a Device or Module (typically a designated console server) which provides access to ConsolePorts.
     """
+
+    is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -363,6 +792,15 @@ class ConsoleServerPort(ModularComponentModel, CableTermination, PathEndpoint):
         blank=True,
         help_text="Physical port type",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_consoleserverport_device_name_unique",
+            ),
+        ]
 
 
 #
@@ -378,10 +816,14 @@ class ConsoleServerPort(ModularComponentModel, CableTermination, PathEndpoint):
     "graphql",
     "webhooks",
 )
-class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
+class PowerPort(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical power supply (intake) port within a Device or Module. PowerPorts connect to PowerOutlets.
     """
+
+    is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -409,6 +851,15 @@ class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
         help_text="Power factor (0.01-1.00) for converting between watts (W) and volt-amps (VA). Defaults to 0.95.",
     )
 
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_powerport_device_name_unique",
+            ),
+        ]
+
     def clean(self):
         super().clean()
 
@@ -424,11 +875,17 @@ class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
         """
         # Calculate aggregate draw of all child power outlets if no numbers have been defined manually
         if self.allocated_draw is None and self.maximum_draw is None:
-            poweroutlet_ct = ContentType.objects.get_for_model(PowerOutlet)
             outlet_ids = PowerOutlet.objects.filter(power_port=self).values_list("pk", flat=True)
-            utilization = PowerPort.objects.filter(
-                _cable_peer_type=poweroutlet_ct, _cable_peer_id__in=outlet_ids
-            ).aggregate(
+
+            # Find PowerPorts connected to these outlets through cables
+            # Query path: PowerPort -> CableEnd -> Cable -> CableEnd -> PowerOutlet
+            connected_powerports = PowerPort.objects.filter(
+                cable_ends__cable__cable_ends__cable_termination__in=outlet_ids
+            ).exclude(
+                pk=self.pk  # Exclude self to avoid double counting
+            )
+
+            utilization = connected_powerports.aggregate(
                 maximum_draw_total=Sum("maximum_draw"),
                 allocated_draw_total=Sum("allocated_draw"),
             )
@@ -449,13 +906,19 @@ class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
             }
 
             # Calculate per-leg aggregates for three-phase feeds
-            if getattr(self._cable_peer, "phase", None) == PowerFeedPhaseChoices.PHASE_3PHASE:
-                # Setup numerator and denominator for later display.
+            cable_peer = self.get_cable_peer()
+            if cable_peer and getattr(cable_peer, "phase", None) == PowerFeedPhaseChoices.PHASE_3PHASE:
+                # Setup numerator and denominator for later display
                 for leg, leg_name in PowerOutletFeedLegChoices:
-                    outlet_ids = PowerOutlet.objects.filter(power_port=self, feed_leg=leg).values_list("pk", flat=True)
-                    utilization = PowerPort.objects.filter(
-                        _cable_peer_type=poweroutlet_ct, _cable_peer_id__in=outlet_ids
-                    ).aggregate(
+                    leg_outlet_ids = PowerOutlet.objects.filter(
+                        power_port=self, feed_leg=leg
+                    ).values_list("pk", flat=True)
+
+                    leg_connected_powerports = PowerPort.objects.filter(
+                        cable_ends__cable__cable_ends__cable_termination__in=leg_outlet_ids
+                    ).exclude(pk=self.pk)
+
+                    utilization = leg_connected_powerports.aggregate(
                         maximum_draw_total=Sum("maximum_draw"),
                         allocated_draw_total=Sum("allocated_draw"),
                     )
@@ -469,7 +932,7 @@ class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
                             "name": leg_name,
                             "allocated": leg_allocated_va,
                             "maximum": leg_maximum_va,
-                            "outlet_count": len(outlet_ids),
+                            "outlet_count": len(leg_outlet_ids),
                         }
                     )
 
@@ -499,10 +962,14 @@ class PowerPort(ModularComponentModel, CableTermination, PathEndpoint):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class PowerOutlet(ModularComponentModel, CableTermination, PathEndpoint):
+class PowerOutlet(CableTermination, ComponentModel, PathEndpoint):
     """
     A physical power outlet (output) within a Device or Module which provides power to a PowerPort.
     """
+
+    is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(
         max_length=50,
@@ -524,6 +991,15 @@ class PowerOutlet(ModularComponentModel, CableTermination, PathEndpoint):
         blank=True,
         help_text="Phase (for three-phase feeds)",
     )
+
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_poweroutlet_device_name_unique",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -593,7 +1069,7 @@ class BaseInterface(RelationshipModel):
             self.status = status
 
         # Only "tagged" interfaces may have tagged VLANs assigned. ("tagged all" implies all VLANs are assigned.)
-        if self.present_in_database and self.mode != InterfaceModeChoices.MODE_TAGGED:  # pylint: disable=no-member
+        if self.present_in_database and self.pk and self.mode != InterfaceModeChoices.MODE_TAGGED:  # pylint: disable=no-member
             self.tagged_vlans.clear()  # pylint: disable=no-member  # Intf/VMIntf both have tagged_vlans
 
         return super().save(*args, **kwargs)
@@ -688,10 +1164,12 @@ class BaseInterface(RelationshipModel):
     "statuses",
     "webhooks",
 )
-class Interface(ModularComponentModel, CableTermination, PathEndpoint, BaseInterface):
+class Interface(CableTermination, ComponentModel, PathEndpoint, BaseInterface):
     """
     A network interface within a Device or Module. A physical Interface can connect to exactly one other Interface.
     """
+
+    is_metadata_associable_model = True
 
     # Override ComponentModel._name to specify naturalize_interface function
     _name = NaturalOrderingField(
@@ -750,21 +1228,31 @@ class Interface(ModularComponentModel, CableTermination, PathEndpoint, BaseInter
     speed = models.PositiveIntegerField(null=True, blank=True)
     duplex = models.CharField(max_length=10, choices=InterfaceDuplexChoices, blank=True, default="")
 
-    class Meta(ModularComponentModel.Meta):
+    natural_key_field_names = ["device", "module", "name"]
+
+    class Meta:
         ordering = ("device", "module__id", CollateAsChar("_name"))  # Module.ordering is complex; don't order by module
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_interface_device_name_unique",
+            ),
+        ]
 
     def clean(self):
         super().clean()
 
         # VRF validation
-        if self.vrf and self.parent and self.vrf not in self.parent.vrfs.all():
-            # TODO(jathan): Or maybe we automatically add the VRF to the device?
-            raise ValidationError({"vrf": "VRF must be assigned to same Device."})
+        # Only validate if parent has PK (can't access reverse relationships otherwise)
+        if self.vrf and self.parent and hasattr(self.parent, 'pk') and self.parent.pk:
+            if self.vrf not in self.parent.vrfs.all():
+                # TODO(jathan): Or maybe we automatically add the VRF to the device?
+                raise ValidationError({"vrf": "VRF must be assigned to same Device."})
 
         # LAG validation
         if self.lag is not None:
-            # A LAG interface cannot be its own parent
-            if self.lag_id == self.pk:
+            # A LAG interface cannot be its own parent (only check for existing instances)
+            if self.pk and self.lag_id == self.pk:
                 raise ValidationError({"lag": "A LAG interface cannot be its own parent."})
 
             # An interface's LAG must belong to the same device or virtual chassis
@@ -1051,10 +1539,12 @@ class InterfaceRedundancyGroupAssociation(BaseModel, ChangeLoggedModel):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class FrontPort(ModularComponentModel, CableTermination):
+class FrontPort(CableTermination, ComponentModel):
     """
     A pass-through port on the front of a Device or Module.
     """
+
+    is_metadata_associable_model = True
 
     type = models.CharField(max_length=50, choices=PortTypeChoices)
     rear_port = models.ForeignKey(to="dcim.RearPort", on_delete=models.CASCADE, related_name="front_ports")
@@ -1068,9 +1558,13 @@ class FrontPort(ModularComponentModel, CableTermination):
 
     natural_key_field_names = ["device", "module", "name", "rear_port", "rear_port_position"]
 
-    class Meta(ModularComponentModel.Meta):
+    class Meta:
+        ordering = ("device", "module__id", "_name")
         constraints = [
-            *ModularComponentModel.Meta.constraints,
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_frontport_device_name_unique",
+            ),
             models.UniqueConstraint(
                 fields=("rear_port", "rear_port_position"),
                 name="dcim_frontport_rear_port_position_unique",
@@ -1095,10 +1589,14 @@ class FrontPort(ModularComponentModel, CableTermination):
 
 
 @extras_features("cable_terminations", "custom_links", "custom_validators", "graphql", "webhooks")
-class RearPort(ModularComponentModel, CableTermination):
+class RearPort(CableTermination, ComponentModel):
     """
     A pass-through port on the rear of a Device or Module.
     """
+
+    is_metadata_associable_model = True
+
+    natural_key_field_names = ["device", "module", "name"]
 
     type = models.CharField(max_length=50, choices=PortTypeChoices)
     positions = models.PositiveSmallIntegerField(
@@ -1109,18 +1607,29 @@ class RearPort(ModularComponentModel, CableTermination):
         ],
     )
 
+    class Meta:
+        ordering = ("device", "module__id", "_name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device", "name"),
+                name="dcim_rearport_device_name_unique",
+            ),
+        ]
+
     def clean(self):
         super().clean()
 
         # Check that positions count is greater than or equal to the number of associated FrontPorts
-        front_port_count = self.front_ports.count()
-        if self.positions < front_port_count:
-            raise ValidationError(
-                {
-                    "positions": f"The number of positions cannot be less than the number of mapped front ports "
-                    f"({front_port_count})"
-                }
-            )
+        # Only validate if instance has been saved (has PK) - can't access reverse relationships otherwise
+        if self.pk:
+            front_port_count = self.front_ports.count()
+            if self.positions < front_port_count:
+                raise ValidationError(
+                    {
+                        "positions": f"The number of positions cannot be less than the number of mapped front ports "
+                        f"({front_port_count})"
+                    }
+                )
 
 
 #
@@ -1133,6 +1642,8 @@ class DeviceBay(ComponentModel):
     """
     An empty space within a Device which can house a child device
     """
+
+    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE)
 
     installed_device = models.OneToOneField(
         to="dcim.Device",
@@ -1191,6 +1702,8 @@ class InventoryItem(TreeModel, ComponentModel):
     An InventoryItem represents a serialized piece of hardware within a Device, such as a line card or power supply.
     InventoryItems are used only for inventory purposes.
     """
+
+    device = ForeignKeyWithAutoRelatedName(to="dcim.Device", on_delete=models.CASCADE)
 
     manufacturer = models.ForeignKey(
         to="dcim.Manufacturer",

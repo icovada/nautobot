@@ -30,7 +30,7 @@ from nautobot.dcim.choices import (
     SubdeviceRoleChoices,
 )
 from nautobot.dcim.constants import MODULE_RECURSION_DEPTH_LIMIT
-from nautobot.dcim.querysets import DeviceQuerySet
+from nautobot.dcim.querysets import DeviceQuerySet, ModuleQuerySet
 from nautobot.dcim.utils import get_all_network_driver_mappings, get_network_driver_mapping_tool_names
 from nautobot.extras.models import ChangeLoggedModel, ConfigContextModel, RoleField, StatusField
 from nautobot.extras.utils import extras_features
@@ -957,8 +957,19 @@ class Device(PrimaryModel, ConfigContextModel):
             (ModuleBay, self.device_type.module_bay_templates.all()),
         ]
         instantiated_components = []
+        # Models inheriting from CableTermination use multi-table inheritance,
+        # which doesn't support bulk_create.
+        multi_table_models = (
+            ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet,
+            Interface, RearPort, FrontPort,
+        )
         for model, templates in component_models:
-            model.objects.bulk_create([x.instantiate(device=self) for x in templates])
+            instances = [x.instantiate(device=self) for x in templates]
+            if issubclass(model, multi_table_models):
+                for instance in instances:
+                    instance.save()
+            else:
+                model.objects.bulk_create(instances)
         cache_key = construct_cache_key(self, method_name="has_module_bays", branch_aware=True)
         cache.delete(cache_key)
         return instantiated_components
@@ -1044,7 +1055,7 @@ class Device(PrimaryModel, ConfigContextModel):
             FrontPort,
             RearPort,
         ]:
-            cable_pks += component_model.objects.filter(device=self, cable__isnull=False).values_list(
+            cable_pks += component_model.objects.filter(device=self, cable_ends__isnull=False).values_list(
                 "cable", flat=True
             )
         if pk_list:
@@ -1928,6 +1939,8 @@ class Module(PrimaryModel):
     )
     # TODO: add software support for Modules
 
+    objects = BaseManager.from_queryset(ModuleQuerySet)()
+
     clone_fields = [
         "module_type",
         "role",
@@ -2056,6 +2069,40 @@ class Module(PrimaryModel):
         if is_new or parent_module_changed:
             self.render_component_names()
 
+    @property
+    def console_ports(self):
+        return ConsolePort.objects.filter(module=self)
+
+    @property
+    def console_server_ports(self):
+        return ConsoleServerPort.objects.filter(module=self)
+
+    @property
+    def power_ports(self):
+        return PowerPort.objects.filter(module=self)
+
+    @property
+    def power_outlets(self):
+        return PowerOutlet.objects.filter(module=self)
+
+    @property
+    def interfaces(self):
+        return Interface.objects.filter(module=self)
+
+    @property
+    def front_ports(self):
+        return FrontPort.objects.filter(module=self)
+
+    @property
+    def rear_ports(self):
+        return RearPort.objects.filter(module=self)
+
+    @property
+    def power_feeds(self):
+        from nautobot.dcim.models.power import PowerFeed
+
+        return PowerFeed.objects.filter(module=self)
+
     def create_components(self):
         """Create module components from the module type definition."""
         # The order of these is significant as
@@ -2072,8 +2119,17 @@ class Module(PrimaryModel):
             (ModuleBay, self.module_type.module_bay_templates.all()),
         ]
         instantiated_components = []
+        multi_table_models = (
+            ConsolePort, ConsoleServerPort, PowerPort, PowerOutlet,
+            Interface, RearPort, FrontPort,
+        )
         for model, templates in component_models:
-            model.objects.bulk_create([x.instantiate(device=None, module=self) for x in templates])
+            instances = [x.instantiate(device=None, module=self) for x in templates]
+            if issubclass(model, multi_table_models):
+                for instance in instances:
+                    instance.save()
+            else:
+                model.objects.bulk_create(instances)
         return instantiated_components
 
     create_components.alters_data = True
@@ -2120,7 +2176,7 @@ class Module(PrimaryModel):
             FrontPort,
             RearPort,
         ]:
-            cable_pks += component_model.objects.filter(module=self, cable__isnull=False).values_list(
+            cable_pks += component_model.objects.filter(module=self, cable_ends__isnull=False).values_list(
                 "cable", flat=True
             )
         if pk_list:

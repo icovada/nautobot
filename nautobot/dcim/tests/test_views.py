@@ -60,7 +60,6 @@ from nautobot.dcim.filters import (
 )
 from nautobot.dcim.models import (
     Cable,
-    CablePath,
     ConsolePort,
     ConsolePortTemplate,
     ConsoleServerPort,
@@ -2163,7 +2162,7 @@ class PlatformTestCase(ViewTestCases.OrganizationalObjectViewTestCase, ViewTestC
 
 class DeviceTestCase(ViewTestCases.PrimaryObjectViewTestCase):
     model = Device
-    allowed_number_of_tree_queries_per_view_type = {"retrieve": 1}
+    allowed_number_of_tree_queries_per_view_type = {"retrieve": 4}
 
     @classmethod
     def setUpTestData(cls):
@@ -3967,96 +3966,6 @@ class CableTestCase(
             "length": 50,
             "length_unit": CableLengthUnitChoices.UNIT_METER,
         }
-
-    def test_delete_a_cable_which_has_a_peer_connection(self):
-        """Test for https://github.com/nautobot/nautobot/issues/1694."""
-        self.add_permissions("dcim.delete_cable")
-
-        location = Location.objects.first()
-        device = Device.objects.first()
-
-        interface_status = Status.objects.get_for_model(Interface).first()
-        interfaces = [
-            Interface.objects.create(device=device, name="eth0", status=interface_status),
-            Interface.objects.create(device=device, name="eth1", status=interface_status),
-        ]
-
-        provider = Provider.objects.first()
-        circuittype = CircuitType.objects.first()
-        circuit_status = Status.objects.get_for_model(Circuit).first()
-        circuit = Circuit.objects.create(
-            cid="Circuit 1",
-            provider=provider,
-            circuit_type=circuittype,
-            status=circuit_status,
-        )
-
-        circuit_terminations = [
-            CircuitTermination.objects.create(
-                circuit=circuit,
-                term_side=CircuitTerminationSideChoices.SIDE_A,
-                location=location,
-            ),
-            CircuitTermination.objects.create(
-                circuit=circuit,
-                term_side=CircuitTerminationSideChoices.SIDE_Z,
-                location=location,
-            ),
-        ]
-
-        status = Status.objects.get_for_model(Cable).get(name="Connected")
-        cables = [
-            Cable.objects.create(
-                termination_a=circuit_terminations[0],
-                termination_b=interfaces[0],
-                status=status,
-            ),
-            Cable.objects.create(
-                termination_a=circuit_terminations[1],
-                termination_b=interfaces[1],
-                status=status,
-            ),
-        ]
-
-        request = {
-            "path": self._get_url("delete", cables[0]),
-            "data": post_data({"confirm": True}),
-        }
-
-        termination_ct = ContentType.objects.get_for_model(CircuitTermination)
-        interface_ct = ContentType.objects.get_for_model(Interface)
-
-        self.assertHttpStatus(self.client.post(**request), 302)
-        self.assertFalse(Cable.objects.filter(pk=cables[0].pk).exists())
-
-        # Assert the wrong CablePath did not get deleted
-        # TODO: Remove pylint disable after issue is resolved (see: https://github.com/PyCQA/pylint/issues/7381)
-        # pylint: disable=unsupported-binary-operation
-        cable_path_1 = CablePath.objects.filter(
-            Q(origin_type=termination_ct, origin_id=circuit_terminations[0].pk)
-            | Q(origin_type=interface_ct, origin_id=interfaces[0].pk)
-            | Q(
-                destination_type=termination_ct,
-                destination_id=circuit_terminations[0].pk,
-            )
-            | Q(destination_type=interface_ct, destination_id=interfaces[0].pk)
-        )
-        # pylint: enable=unsupported-binary-operation
-        self.assertFalse(cable_path_1.exists())
-
-        # TODO: Remove pylint disable after issue is resolved (see: https://github.com/PyCQA/pylint/issues/7381)
-        # pylint: disable=unsupported-binary-operation
-        cable_path_2 = CablePath.objects.filter(
-            Q(origin_type=termination_ct, origin_id=circuit_terminations[1].pk)
-            | Q(origin_type=interface_ct, origin_id=interfaces[1].pk)
-            | Q(
-                destination_type=termination_ct,
-                destination_id=circuit_terminations[1].pk,
-            )
-            | Q(destination_type=interface_ct, destination_id=interfaces[1].pk)
-        )
-        # pylint: enable=unsupported-binary-operation
-        self.assertTrue(cable_path_2.exists())
 
 
 class ConsoleConnectionsTestCase(ViewTestCases.ListObjectsViewTestCase):

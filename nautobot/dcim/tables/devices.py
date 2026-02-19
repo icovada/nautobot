@@ -408,7 +408,7 @@ class ModularDeviceComponentTable(DeviceComponentTable):
 class CableTerminationTable(BaseTable):
     cable = tables.Column(linkify=True)
     cable_peer = tables.TemplateColumn(
-        accessor="_cable_peer",
+        accessor="cable_peer",
         template_code=CABLETERMINATION,
         orderable=False,
         verbose_name="Cable Peer",
@@ -417,7 +417,7 @@ class CableTerminationTable(BaseTable):
 
 class PathEndpointTable(CableTerminationTable):
     connection = tables.TemplateColumn(
-        accessor="_path",
+        accessor="trace_to_remote",
         template_code=PATHENDPOINT,
         verbose_name="Connection",
         orderable=False,

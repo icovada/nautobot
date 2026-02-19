@@ -432,19 +432,25 @@ class Rack(PrimaryModel):
         if not available_power_total:
             return UtilizationData(numerator=0, denominator=0)
 
+        # Find PowerPorts connected to these PowerFeeds through cables
+        # Query path: PowerPort -> CableEnd -> Cable -> CableEnd -> PowerFeed
         pf_powerports = PowerPort.objects.filter(
-            _cable_peer_type=ContentType.objects.get_for_model(PowerFeed),
-            _cable_peer_id__in=powerfeeds.values_list("id", flat=True),
+            cable_ends__cable__cable_ends__cable_termination__in=powerfeeds.values_list("id", flat=True)
         )
+
         direct_allocated_draw = int(
             pf_powerports.aggregate(total=Sum(F("allocated_draw") / F("power_factor")))["total"] or 0
         )
+
+        # Find PowerOutlets connected to those PowerPorts
         poweroutlets = PowerOutlet.objects.filter(power_port_id__in=pf_powerports)
+
+        # Find PowerPorts connected to those PowerOutlets
         allocated_draw_total = int(
             PowerPort.objects.filter(
-                _cable_peer_type=ContentType.objects.get_for_model(PowerOutlet),
-                _cable_peer_id__in=poweroutlets.values_list("id", flat=True),
-            ).aggregate(total=Sum(F("allocated_draw") / F("power_factor")))["total"]
+                cable_ends__cable__cable_ends__cable_termination__in=poweroutlets.values_list("id", flat=True)
+            )
+            .aggregate(total=Sum(F("allocated_draw") / F("power_factor")))["total"]
             or 0
         )
         allocated_draw_total += direct_allocated_draw
